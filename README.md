@@ -16,7 +16,7 @@
 - 8단계 모바일 우선 작성 화면과 브라우저 자동 저장
 - 이메일 매직링크 로그인, CSRF 보호, 계정 초안 버전·충돌 관리
 - SQLite 개발 모드와 PostgreSQL 운영 모드
-- 로컬 개발 저장소와 암호화된 S3 호환 문서 저장소
+- 로컬 개발 저장소와 암호화된 AWS S3 문서 저장소
 - 업로드 의도·삭제 재시도·저장 위치 고정을 기록하는 영속 객체 정리 큐
 - 수동 최초 전체 수집과 매일 갱신을 분리한 GitHub Actions
 - 개조식·스토리텔링 출력, 누락 사실의 `[확인 필요]` 표시
@@ -51,6 +51,24 @@ python -m jobandkill serve
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+## Render 파일럿 배포
+
+저장소의 `render.yaml`은 싱가포르 리전에 무료 웹 서비스와 무료 PostgreSQL을 함께 만들고, 내부 DB 주소·Render 공개 HTTPS 주소·플랫폼 생성 인증 제한 키를 자동 연결합니다.
+
+[Render에서 Job&Kill Blueprint 열기](https://render.com/deploy?repo=https://github.com/jonandkill/Jobandkill/tree/jobandkill1)
+
+Dashboard가 요청하면 `jobandkill1` 브랜치를 선택하고 로그인 메일 값만 Render의 비밀 환경변수 입력란에 넣습니다. 값은 채팅이나 GitHub 커밋에 넣지 않습니다.
+
+- 로그인 메일: `JOBNKILL_SMTP_HOST`, `JOBNKILL_SMTP_PORT`, `JOBNKILL_SMTP_USERNAME`, `JOBNKILL_SMTP_PASSWORD`, `JOBNKILL_SMTP_FROM`
+
+S3는 공개 웹이 아니라 수집·문서 처리 작업만 사용합니다. `JOBNKILL_S3_BUCKET`, `JOBNKILL_S3_ACCESS_KEY_ID`, `JOBNKILL_S3_SECRET_ACCESS_KEY`는 공식 API 키와 함께 GitHub의 보호된 `production` Environment에 저장하고 Render 웹 서비스에는 AWS 키를 주입하지 않습니다.
+
+현재 객체 저장 구현은 버킷 버전 관리 조회와 서버 측 암호화를 요구하므로, 먼저 비공개 AWS S3 버킷을 사용합니다. 버전 관리를 한 번도 켜지 않은 전용 버킷과 `GetBucketVersioning`, 암호화된 `PutObject`, `DeleteObject` 최소 권한이 필요합니다. Cloudflare R2처럼 이 API 계약이 다른 저장소는 별도 어댑터 없이는 지원하지 않습니다.
+
+Render 무료 웹 서비스는 SMTP 25/465/587 포트를 차단합니다. 메일 공급자가 STARTTLS 대체 포트(예: 2525)를 지원할 때 그 포트를 입력해야 하며, 지원하지 않으면 유료 웹 서비스 또는 HTTPS 메일 API 어댑터가 필요합니다.
+
+무료 구성은 공개 URL과 기능을 확인하는 파일럿용입니다. 무료 PostgreSQL은 30일 후 만료되고 관리형 백업이 없으므로 실제 운영 데이터 적재 전 유료 DB·백업·외부 접근 제한 방식을 확정해야 합니다. 전체 운영 연결 순서는 `docs/operations.md`에 있습니다.
 
 ## 공식 채용정보 수집 연결
 
@@ -132,7 +150,7 @@ flowchart TD
 - 바이너리 HWP 변환기 및 스캔 PDF용 한국어 OCR 작업 큐
 - 운영 배포 후 320/390/768/1440px 시각 QA
 
-운영 값은 채팅이나 저장소에 넣지 않습니다. `requirements-production.txt`를 설치하고 `JOBNKILL_DATABASE_URL`, S3, SMTP, 공개 HTTPS 주소를 배포 플랫폼의 Secret Manager 또는 GitHub Environment에 설정한 뒤 아래 점검을 통과시켜야 합니다. 전체 절차는 `docs/operations.md`에 있습니다.
+운영 값은 채팅이나 저장소에 넣지 않습니다. `requirements-production.txt`를 설치하고 `JOBNKILL_DATABASE_URL`, S3, SMTP, 공개 HTTPS 주소를 배포 플랫폼의 Secret Manager 또는 GitHub Environment에 설정한 뒤 아래 점검을 통과시켜야 합니다. Render에서는 공개 주소와 내부 DB 주소가 Blueprint로 자동 연결됩니다. 전체 절차는 `docs/operations.md`에 있습니다.
 
 ```bash
 python -m jobandkill doctor --production --require-api

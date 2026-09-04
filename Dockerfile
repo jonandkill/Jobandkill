@@ -23,6 +23,6 @@ USER jobandkill
 
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import json,os,urllib.request; port=os.environ.get('JOBNKILL_PORT','8787'); assert json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/api/health', timeout=3))['status']=='ok'"
+  CMD python -c "import json,os,urllib.request; port=os.environ.get('PORT',os.environ.get('JOBNKILL_PORT','8787')); assert json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/api/health', timeout=3))['status']=='ok'"
 
 CMD ["python", "-m", "jobandkill", "serve"]

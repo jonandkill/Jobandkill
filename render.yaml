@@ -1,0 +1,44 @@
+databases:
+  - name: jobandkill-db
+    databaseName: jobandkill
+    user: jobandkill
+    plan: free
+    region: singapore
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: jobandkill-career-writer
+    runtime: python
+    plan: free
+    region: singapore
+    repo: https://github.com/jonandkill/Jobandkill
+    branch: jobandkill1
+    autoDeployTrigger: checksPass
+    buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements-production.txt
+    startCommand: python -m jobandkill serve
+    healthCheckPath: /api/health
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: JOBNKILL_ENV
+        value: production
+      - key: JOBNKILL_HOST
+        value: 0.0.0.0
+      - key: JOBNKILL_DATABASE_URL
+        fromDatabase:
+          name: jobandkill-db
+          property: connectionString
+      - key: JOBNKILL_AUTH_RATE_SECRET
+        generateValue: true
+      - key: JOBNKILL_SMTP_HOST
+        sync: false
+      - key: JOBNKILL_SMTP_PORT
+        sync: false
+      - key: JOBNKILL_SMTP_SECURITY
+        value: starttls
+      - key: JOBNKILL_SMTP_USERNAME
+        sync: false
+      - key: JOBNKILL_SMTP_PASSWORD
+        sync: false
+      - key: JOBNKILL_SMTP_FROM
+        sync: false

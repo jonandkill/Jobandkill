@@ -3,9 +3,10 @@ from __future__ import annotations
 import importlib.util
 import os
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 from .auth import environment
+from .db import POSTGRES_TLS_MODES, postgres_sslmode, render_private_postgres_url
 
 
 def _check(name: str, ready: bool, message: str) -> dict[str, Any]:
@@ -13,18 +14,34 @@ def _check(name: str, ready: bool, message: str) -> dict[str, Any]:
 
 
 def configuration_report(
-    production: bool = False, require_api: bool = False, collector_only: bool = False
+    production: bool = False,
+    require_api: bool = False,
+    collector_only: bool = False,
+    require_storage: bool = True,
 ) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     database_url = os.getenv("JOBNKILL_DATABASE_URL", os.getenv("DATABASE_URL", "")).strip()
     postgres = database_url.startswith(("postgresql://", "postgres://"))
-    sslmode = parse_qs(urlsplit(database_url).query).get("sslmode", [os.getenv("PGSSLMODE", "")])[-1] if postgres else ""
-    tls_ready = not production or sslmode in {"require", "verify-ca", "verify-full"}
+    sslmode = postgres_sslmode(database_url) if postgres else ""
+    render_private_database = bool(
+        production
+        and postgres
+        and render_private_postgres_url(database_url)
+    )
+    tls_ready = (
+        not production
+        or sslmode in POSTGRES_TLS_MODES
+        or render_private_database
+    )
     database_ready = postgres and tls_ready if production else (postgres or not database_url)
     checks.append(_check(
         "database",
         database_ready,
-        ("PostgreSQL TLS 설정됨" if tls_ready else "PostgreSQL sslmode=require 이상 필요") if postgres
+        (
+            "Render 비공개 PostgreSQL 연결 설정됨"
+            if render_private_database
+            else ("PostgreSQL TLS 설정됨" if tls_ready else "PostgreSQL sslmode=require 이상 필요")
+        ) if postgres
         else ("SQLite 개발 모드" if not production else "운영 PostgreSQL URL 필요"),
     ))
     if postgres:
@@ -33,22 +50,26 @@ def configuration_report(
             "psycopg 설치됨" if importlib.util.find_spec("psycopg") else "운영 의존성 psycopg 필요",
         ))
 
-    backend = os.getenv("JOBNKILL_STORAGE_BACKEND", "local").strip().lower()
-    storage_ready = backend == "s3" and bool(os.getenv("JOBNKILL_S3_BUCKET", "").strip()) if production else backend in {"local", "s3"}
-    checks.append(_check(
-        "document_storage", storage_ready,
-        "S3 비공개 저장소 설정됨" if backend == "s3" and storage_ready else (
-            "로컬 개발 저장소" if backend == "local" and not production else "운영 S3 버킷 설정 필요"
-        ),
-    ))
-    if backend == "s3":
+    if require_storage:
+        backend = os.getenv("JOBNKILL_STORAGE_BACKEND", "local").strip().lower()
+        storage_ready = backend == "s3" and bool(os.getenv("JOBNKILL_S3_BUCKET", "").strip()) if production else backend in {"local", "s3"}
         checks.append(_check(
-            "s3_driver", importlib.util.find_spec("boto3") is not None,
-            "boto3 설치됨" if importlib.util.find_spec("boto3") else "운영 의존성 boto3 필요",
+            "document_storage", storage_ready,
+            "S3 비공개 저장소 설정됨" if backend == "s3" and storage_ready else (
+                "로컬 개발 저장소" if backend == "local" and not production else "운영 S3 버킷 설정 필요"
+            ),
         ))
+        if backend == "s3":
+            checks.append(_check(
+                "s3_driver", importlib.util.find_spec("boto3") is not None,
+                "boto3 설치됨" if importlib.util.find_spec("boto3") else "운영 의존성 boto3 필요",
+            ))
 
     if not collector_only:
-        public = os.getenv("JOBNKILL_PUBLIC_URL", "").strip()
+        public = (
+            os.getenv("JOBNKILL_PUBLIC_URL", "").strip()
+            or os.getenv("RENDER_EXTERNAL_URL", "").strip()
+        )
         parsed = urlsplit(public) if public else None
         public_ready = bool(parsed and parsed.hostname and parsed.scheme == "https") if production else True
         checks.append(_check("public_url", public_ready, "HTTPS 공개 주소 설정됨" if public_ready and public else (
@@ -93,7 +114,7 @@ def configuration_report(
 
 
 def require_production_settings() -> None:
-    report = configuration_report(production=True)
+    report = configuration_report(production=True, require_storage=False)
     missing = [item["name"] for item in report["checks"] if not item["ready"]]
     if missing:
         raise RuntimeError("운영 필수 설정이 준비되지 않았습니다: " + ", ".join(missing))

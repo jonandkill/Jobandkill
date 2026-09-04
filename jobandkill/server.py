@@ -120,7 +120,16 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
             ]
         except ValueError:
             return peer_text
-        if not any(peer in network for network in networks):
+        render_private_proxy = (
+            os.getenv("RENDER", "").strip().lower() == "true" and peer.is_private
+        )
+
+        def trusted(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+            return any(address in network for network in networks) or (
+                render_private_proxy and address == peer
+            )
+
+        if not trusted(peer):
             return str(peer)
         forwarded = self.headers.get("X-Forwarded-For", "")
         try:
@@ -128,7 +137,7 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
         except ValueError:
             return str(peer)
         for address in reversed([*chain, peer]):
-            if not any(address in network for network in networks):
+            if not trusted(address):
                 return str(address)
         return str(peer)
 
@@ -345,7 +354,7 @@ class JobAndKillServer(ThreadingHTTPServer):
 
 def serve(host: str | None = None, port: int | None = None, db_path: DatabaseTarget | None = None) -> None:
     host = host or os.getenv("JOBNKILL_HOST", "127.0.0.1")
-    port = port or int(os.getenv("JOBNKILL_PORT", "8787"))
+    port = port or int(os.getenv("PORT", os.getenv("JOBNKILL_PORT", "8787")))
     server = JobAndKillServer((host, port), db_path)
     print(f"Job&Kill: http://{host}:{port}")
     try:

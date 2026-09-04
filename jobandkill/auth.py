@@ -110,7 +110,10 @@ def _record_rate_event(connection: Connection, subject_hash: str, maximum: int) 
 
 
 def public_url() -> str:
-    configured = os.getenv("JOBNKILL_PUBLIC_URL", "").strip().rstrip("/")
+    configured = (
+        os.getenv("JOBNKILL_PUBLIC_URL", "").strip()
+        or os.getenv("RENDER_EXTERNAL_URL", "").strip()
+    ).rstrip("/")
     if not configured:
         if environment() == "production":
             raise AuthError("auth_config", "JOBNKILL_PUBLIC_URL이 설정되지 않았습니다.", 500)

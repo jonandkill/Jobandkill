@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = ROOT / "data" / "jobandkill.db"
 DatabaseTarget = Path | str
 Params = Sequence[Any] | Mapping[str, Any]
+POSTGRES_TLS_MODES = frozenset({"require", "verify-ca", "verify-full"})
 
 
 def database_path() -> Path:
@@ -33,6 +34,23 @@ def database_target(target: DatabaseTarget | None = None) -> DatabaseTarget:
             raise ValueError("DATABASE_URL은 PostgreSQL URL이어야 합니다.")
         return configured
     return database_path()
+
+
+def render_private_postgres_url(database_url: str) -> bool:
+    """Return whether a URL targets Render's same-region private network."""
+    parsed = urlsplit(database_url)
+    return bool(
+        os.getenv("RENDER", "").strip().lower() == "true"
+        and parsed.scheme in {"postgresql", "postgres"}
+        and parsed.hostname
+        and "." not in parsed.hostname
+    )
+
+
+def postgres_sslmode(database_url: str) -> str:
+    return parse_qs(urlsplit(database_url).query).get(
+        "sslmode", [os.getenv("PGSSLMODE", "")]
+    )[-1]
 
 
 class Connection:
@@ -81,10 +99,12 @@ class Connection:
 def connect(target: DatabaseTarget | None = None) -> Connection:
     resolved = database_target(target)
     if isinstance(resolved, str) and resolved.startswith(("postgresql://", "postgres://")):
-        sslmode = parse_qs(urlsplit(resolved).query).get("sslmode", [os.getenv("PGSSLMODE", "")])[-1]
-        if os.getenv("JOBNKILL_ENV", "development").strip().lower() == "production" and sslmode not in {
-            "require", "verify-ca", "verify-full",
-        }:
+        sslmode = postgres_sslmode(resolved)
+        if (
+            os.getenv("JOBNKILL_ENV", "development").strip().lower() == "production"
+            and sslmode not in POSTGRES_TLS_MODES
+            and not render_private_postgres_url(resolved)
+        ):
             raise RuntimeError("운영 PostgreSQL은 sslmode=require 이상으로 암호화해야 합니다.")
         try:
             import psycopg
