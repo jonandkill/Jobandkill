@@ -87,7 +87,10 @@ CREATE TABLE IF NOT EXISTS attachments (
         rights_status IN ('open_document', 'authorized', 'metadata_only', 'restricted', 'review_required')
     ),
     rights_reason TEXT NOT NULL DEFAULT '',
+    rights_revision INTEGER NOT NULL DEFAULT 0,
     storage_path TEXT,
+    storage_backend TEXT NOT NULL DEFAULT '',
+    storage_key TEXT,
     sha256 TEXT,
     parser_status TEXT NOT NULL DEFAULT 'not_requested' CHECK (
         parser_status IN ('not_requested', 'queued', 'parsed', 'unsupported', 'failed', 'blocked_by_rights')
@@ -95,16 +98,54 @@ CREATE TABLE IF NOT EXISTS attachments (
     extracted_text TEXT,
     collected_at TEXT,
     last_checked_at TEXT,
+    processing_started_at TEXT,
+    processing_token TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(posting_id, external_key)
 );
 CREATE INDEX IF NOT EXISTS attachments_rights_idx ON attachments(rights_status, parser_status);
 
+CREATE TABLE IF NOT EXISTS document_objects (
+    storage_backend TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    sha256 TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL CHECK (state IN ('staging', 'ready', 'delete_pending')),
+    upload_attachment_id INTEGER,
+    upload_claim_token TEXT,
+    upload_started_at TEXT,
+    ready_at TEXT,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(storage_backend, storage_key)
+);
+CREATE INDEX IF NOT EXISTS document_objects_state_idx ON document_objects(state, updated_at);
+
+CREATE TABLE IF NOT EXISTS document_gc_queue (
+    storage_backend TEXT NOT NULL,
+    storage_key TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(storage_backend, storage_key)
+);
+CREATE INDEX IF NOT EXISTS document_gc_due_idx ON document_gc_queue(next_attempt_at, updated_at);
+
+CREATE TABLE IF NOT EXISTS storage_namespaces (
+    storage_backend TEXT PRIMARY KEY,
+    location_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS job_profiles (
     id INTEGER PRIMARY KEY,
     posting_id INTEGER NOT NULL REFERENCES postings(id) ON DELETE CASCADE,
-    attachment_id INTEGER REFERENCES attachments(id) ON DELETE SET NULL,
+    attachment_id INTEGER REFERENCES attachments(id) ON DELETE CASCADE,
     institution_name TEXT NOT NULL,
     job_title TEXT NOT NULL,
     ncs_code TEXT NOT NULL DEFAULT '',
@@ -197,6 +238,60 @@ CREATE TABLE IF NOT EXISTS rights_decisions (
     decided_by TEXT NOT NULL,
     decided_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    email_verified_at TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    last_login_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS login_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL,
+    used_at TEXT,
+    request_subject_hash TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS login_tokens_expiry_idx ON login_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    csrf_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    idle_expires_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS user_drafts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_key TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL,
+    current_step INTEGER NOT NULL DEFAULT 0 CHECK (current_step BETWEEN 0 AND 7),
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, client_key)
+);
+CREATE INDEX IF NOT EXISTS user_drafts_user_updated_idx ON user_drafts(user_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS auth_request_events (
+    id INTEGER PRIMARY KEY,
+    subject_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS auth_request_events_subject_idx ON auth_request_events(subject_hash, created_at);
 
 INSERT OR IGNORE INTO sources(
     slug, name, provider, base_url, sync_mode, default_rights, license_note, enabled

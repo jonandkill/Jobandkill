@@ -42,7 +42,7 @@ def _items(value: Any, maximum: int = 12) -> list[str]:
     return result[:maximum]
 
 
-def normalize_draft(payload: dict[str, Any]) -> dict[str, Any]:
+def sanitize_draft(payload: dict[str, Any], require_confirmation: bool = False) -> dict[str, Any]:
     errors: dict[str, str] = {}
     document_type = _text(payload.get("document_type"), 30)
     style = _text(payload.get("style"), 30)
@@ -50,7 +50,7 @@ def normalize_draft(payload: dict[str, Any]) -> dict[str, Any]:
         errors["document_type"] = "경력기술서 또는 경험기술서를 선택해 주세요."
     if style not in {"bullet", "narrative"}:
         errors["style"] = "개조식 또는 스토리텔링을 선택해 주세요."
-    if payload.get("facts_confirmed") is not True:
+    if require_confirmation and payload.get("facts_confirmed") is not True:
         errors["facts_confirmed"] = "입력한 내용이 실제 경험이라는 확인이 필요합니다."
     try:
         target_length = int(payload.get("target_length", 800))
@@ -83,7 +83,14 @@ def normalize_draft(payload: dict[str, Any]) -> dict[str, Any]:
         "evidence": _text(payload.get("evidence")),
         "contribution": _text(payload.get("contribution")),
         "learning": _text(payload.get("learning")),
+        "facts_confirmed": payload.get("facts_confirmed") is True,
     }
+
+
+def normalize_draft(payload: dict[str, Any]) -> dict[str, Any]:
+    draft = sanitize_draft(payload, require_confirmation=True)
+    draft.pop("facts_confirmed", None)
+    return draft
 
 
 def _or_missing(value: str) -> str:

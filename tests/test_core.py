@@ -4,14 +4,17 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from jobandkill.db import connect, get_profile, initialize, public_stats, search_profiles
 from jobandkill.ingest import (
     extract_sections,
+    get_attachment_rights_review,
     ingest_records,
     normalize_api_record,
     parse_api_payload,
     set_attachment_rights,
+    sync_source,
 )
 from jobandkill.writer import DraftValidationError, compose
 
@@ -55,6 +58,16 @@ class DatabaseTestCase(unittest.TestCase):
         self.assertEqual(item.application_end, "2026-09-15")
         self.assertEqual(item.attachments[0].kind, "job_description")
 
+    def test_normalizes_xml_style_single_attachment_container(self) -> None:
+        record = self.sample_record()
+        record["attachments"] = {"item": record["attachments"][0]}
+        item = normalize_api_record(record, "https://www.data.go.kr/")
+        self.assertIsNotNone(item)
+        assert item is not None
+        self.assertTrue(item.attachments_authoritative)
+        self.assertEqual(len(item.attachments), 1)
+        self.assertEqual(item.attachments[0].external_key, "A-1")
+
     def test_ingest_is_idempotent_and_searchable(self) -> None:
         with connect(self.db_path) as connection:
             first = ingest_records(
@@ -90,12 +103,120 @@ class DatabaseTestCase(unittest.TestCase):
             "기관으로부터 서비스 내 분석 이용 허가를 받음",
             "compliance@example.test",
             self.db_path,
+            expected_identity=get_attachment_rights_review(attachment_id, self.db_path)["identity"],
         )
         with connect(self.db_path) as connection:
             attachment = connection.execute("SELECT * FROM attachments WHERE id=?", (attachment_id,)).fetchone()
             audit = connection.execute("SELECT * FROM rights_decisions WHERE attachment_id=?", (attachment_id,)).fetchone()
             self.assertEqual(attachment["parser_status"], "queued")
             self.assertEqual(audit["new_status"], "authorized")
+
+    def test_orphaned_attachment_profile_is_never_treated_as_metadata(self) -> None:
+        with connect(self.db_path) as connection:
+            ingest_records(
+                connection, "data-go-kr-alio", [self.sample_record()], "https://www.data.go.kr/"
+            )
+            posting_id = int(connection.execute("SELECT id FROM postings").fetchone()["id"])
+            attachment_id = int(connection.execute("SELECT id FROM attachments").fetchone()["id"])
+            cursor = connection.execute(
+                """
+                INSERT INTO job_profiles(
+                  posting_id, attachment_id, institution_name, job_title, summary,
+                  extraction_status, rights_status, parser_version
+                ) VALUES (?, ?, '한국테스트공사', '고유파생직무', '삭제된 첨부에서 추출',
+                          'machine_extracted', 'open_document', 'test')
+                """,
+                (posting_id, attachment_id),
+            )
+            profile_id = int(cursor.lastrowid)
+            # Simulate an upgraded legacy schema whose FK used ON DELETE SET NULL.
+            connection.execute(
+                "UPDATE job_profiles SET attachment_id=NULL WHERE id=?", (profile_id,)
+            )
+            self.assertEqual(search_profiles(connection, "고유파생직무"), [])
+            self.assertIsNone(get_profile(connection, profile_id))
+
+    def test_sync_continues_pages_and_reports_partial_after_cleanup_error(self) -> None:
+        first = self.sample_record()
+        first["attachments"] = [{"fileNo": "A-bad", "fileName": "URL 누락.pdf"}]
+        second = self.sample_record()
+        second["recrutPblntSn"] = "OFFICIAL-200"
+        second["recrutPbancTtl"] = "2026년 전산 공개채용"
+
+        class TwoPageSource:
+            truncated = False
+            total_count = 2
+
+            def fetch(self):
+                yield [first]
+                yield [second]
+
+        failed_cleanup = {
+            "failed": 1, "due_remaining": 0, "pending_total": 1,
+            "pending_attachments": 0, "quarantined": 0,
+        }
+        clean_cleanup = {
+            "failed": 0, "due_remaining": 0, "pending_total": 0,
+            "pending_attachments": 0, "quarantined": 0,
+        }
+        with patch.dict(
+            "jobandkill.ingest.SOURCE_FACTORIES", {"data-go-kr-alio": TwoPageSource}
+        ), patch(
+            "jobandkill.ingest.purge_restricted_documents",
+            side_effect=[failed_cleanup, clean_cleanup, clean_cleanup],
+        ):
+            result = sync_source("data-go-kr-alio", self.db_path)
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["seen"], 2)
+        self.assertEqual(result["attachment_errors"], 1)
+        self.assertEqual(result["cleanup_failed"], 1)
+        with connect(self.db_path) as connection:
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) AS count FROM postings").fetchone()["count"], 2
+            )
+
+    def test_stale_review_token_cannot_override_newer_restriction(self) -> None:
+        with connect(self.db_path) as connection:
+            ingest_records(
+                connection, "data-go-kr-alio", [self.sample_record()], "https://www.data.go.kr/"
+            )
+            attachment_id = int(connection.execute("SELECT id FROM attachments").fetchone()["id"])
+        stale_identity = get_attachment_rights_review(attachment_id, self.db_path)["identity"]
+        set_attachment_rights(
+            attachment_id, "restricted", "기관 정책상 상업 서비스 재이용이 금지됨",
+            "compliance@example.test", self.db_path,
+        )
+        with self.assertRaises(ValueError):
+            set_attachment_rights(
+                attachment_id, "authorized", "이전에 검토했던 허용 증빙을 뒤늦게 적용",
+                "compliance@example.test", self.db_path,
+                expected_identity=stale_identity,
+            )
+        self.assertEqual(
+            get_attachment_rights_review(attachment_id, self.db_path)["rights_status"],
+            "restricted",
+        )
+
+    def test_review_token_expires_when_feed_removes_already_blocked_file(self) -> None:
+        record = self.sample_record()
+        with connect(self.db_path) as connection:
+            ingest_records(
+                connection, "data-go-kr-alio", [record], "https://www.data.go.kr/"
+            )
+            attachment_id = int(connection.execute("SELECT id FROM attachments").fetchone()["id"])
+        stale_identity = get_attachment_rights_review(attachment_id, self.db_path)["identity"]
+        removed = self.sample_record()
+        removed["attachments"] = []
+        with connect(self.db_path) as connection:
+            ingest_records(
+                connection, "data-go-kr-alio", [removed], "https://www.data.go.kr/"
+            )
+        with self.assertRaises(ValueError):
+            set_attachment_rights(
+                attachment_id, "authorized", "삭제 전 검토했던 이용 승인 근거를 적용",
+                "compliance@example.test", self.db_path,
+                expected_identity=stale_identity,
+            )
 
 
 class ParsingTests(unittest.TestCase):

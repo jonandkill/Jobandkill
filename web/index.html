@@ -22,6 +22,7 @@
           <span class="status-dot" aria-hidden="true"></span>
           <span id="status-label">데이터 확인 중</span>
         </button>
+        <button class="account-button" id="open-auth" type="button" aria-haspopup="dialog" aria-controls="auth-dialog">로그인</button>
         <button class="button button-dark button-small" id="header-start" type="button">작성 시작</button>
       </nav>
     </header>
@@ -105,9 +106,9 @@
           </div>
           <button class="button button-outline-light button-full" id="change-job" type="button">직무 검색·변경</button>
 
-          <div class="privacy-note">
+          <div class="privacy-note" id="privacy-note">
             <span aria-hidden="true">◇</span>
-            <p><strong>사실 기반 작성</strong>작성 내용은 이 브라우저에 임시 저장되며, 확인하지 않은 정보는 만들지 않습니다.</p>
+            <p><strong>사실 기반 작성</strong><span id="privacy-copy">작성 내용은 이 브라우저에 임시 저장되며, 확인하지 않은 정보는 만들지 않습니다.</span></p>
           </div>
         </aside>
 
@@ -115,7 +116,7 @@
           <div class="builder-topline">
             <div>
               <p class="step-kicker" id="step-kicker">STEP 1 OF 8</p>
-              <h2 id="builder-title">작성 형식을 골라주세요.</h2>
+              <h2 id="builder-title" tabindex="-1">작성 형식을 골라주세요.</h2>
             </div>
             <button class="reset-button" id="reset-draft" type="button">처음부터</button>
           </div>
@@ -124,12 +125,20 @@
             <span id="progress-bar"></span>
           </div>
 
+          <div class="sync-notice" id="sync-notice" role="status" aria-live="polite" hidden>
+            <p id="sync-notice-copy"></p>
+            <div>
+              <button class="button button-dark button-small" id="keep-local-draft" type="button">이 기기 내용 사용</button>
+              <button class="button button-quiet button-small" id="use-server-draft" type="button">계정 내용 불러오기</button>
+            </div>
+          </div>
+
           <div class="step-content" id="step-content"></div>
           <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
 
           <div class="builder-nav">
             <button class="button button-quiet" id="previous-step" type="button">← 이전</button>
-            <span class="autosave-state" id="autosave-state">이 브라우저에 자동 저장</span>
+            <span class="autosave-state" id="autosave-state" role="status" aria-live="polite" aria-atomic="true">이 브라우저에 자동 저장</span>
             <button class="button button-dark" id="next-step" type="button">다음 →</button>
           </div>
         </article>
@@ -182,6 +191,32 @@
       <p class="modal-intro">공개 열람과 상업적 재배포는 다릅니다. 각 소스의 메타데이터와 첨부문서를 분리해 관리합니다.</p>
       <div class="source-list" id="source-list" aria-live="polite"><p class="loading-line">출처를 확인하고 있습니다…</p></div>
       <a class="policy-link" id="copyright-policy" href="https://www.ncs.go.kr/unity/th01/selectPolicyPopView.do" target="_blank" rel="noopener noreferrer">NCS 저작권정책 원문 보기 ↗</a>
+    </dialog>
+
+    <dialog class="modal auth-modal" id="auth-dialog" aria-labelledby="auth-dialog-title">
+      <div class="modal-header">
+        <div><p class="step-kicker">YOUR ACCOUNT</p><h2 id="auth-dialog-title">계정에 이어서 저장</h2></div>
+        <button class="icon-button" data-close-dialog="auth-dialog" type="button" aria-label="닫기">×</button>
+      </div>
+      <section class="auth-panel" id="signed-out-panel">
+        <p>비밀번호 없이 이메일로 로그인합니다. 작성은 로그인하지 않아도 계속할 수 있습니다.</p>
+        <form class="auth-form" id="login-form">
+          <label for="login-email">이메일</label>
+          <input id="login-email" name="email" type="email" autocomplete="email" inputmode="email" required placeholder="name@example.com">
+          <button class="button button-dark" id="request-login" type="submit">로그인 링크 받기</button>
+        </form>
+        <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
+        <a class="development-link" id="development-login-link" href="#" hidden>개발용 로그인 링크 열기</a>
+        <small>링크는 15분 동안 한 번만 사용할 수 있습니다.</small>
+      </section>
+      <section class="auth-panel" id="signed-in-panel" hidden>
+        <span class="account-label">로그인된 계정</span>
+        <strong id="account-email"></strong>
+        <p>동의한 초안은 계정에 저장되어 다른 기기에서도 이어서 쓸 수 있습니다.</p>
+        <p class="auth-status" id="account-status" role="status" aria-live="polite"></p>
+        <label class="logout-option"><input id="clear-local-on-logout" type="checkbox"> 로그아웃할 때 이 브라우저의 초안도 지우기</label>
+        <button class="button button-quiet" id="logout" type="button">로그아웃</button>
+      </section>
     </dialog>
 
     <dialog class="modal result-modal" id="result-dialog" aria-labelledby="result-dialog-title">

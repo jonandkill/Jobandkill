@@ -1,6 +1,8 @@
 "use strict";
 
 const STORAGE_KEY = "jobandkill-draft-v1";
+const STEP_KEY = "jobandkill-step-v1";
+const CLIENT_KEY = "jobandkill-client-key-v1";
 const FIELDS = [
   "document_type", "style", "target_length", "institution", "target_job", "ncs_path",
   "matched_duty", "matched_skill", "experience_title", "organization", "period_start",
@@ -16,7 +18,12 @@ const defaults = {
 };
 
 let state = loadState();
-let currentStep = 0;
+let currentStep = Math.min(Math.max(Number(localStorage.getItem(STEP_KEY) || 0), 0), 7);
+let authState = { status: "loading", user: null };
+let syncState = {
+  consent: false, draftId: null, revision: null, pendingServer: null, pendingMode: null,
+  clientKey: getClientKey(), timer: null, saving: false, dirty: false
+};
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -24,14 +31,7 @@ const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selec
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    const clean = { ...defaults };
-    for (const key of FIELDS) {
-      if (Object.hasOwn(saved, key)) clean[key] = saved[key];
-    }
-    clean.actions = Array.isArray(clean.actions) && clean.actions.length ? clean.actions.slice(0, 12) : [""];
-    clean.tools = Array.isArray(clean.tools) ? clean.tools.slice(0, 12) : [];
-    clean.facts_confirmed = clean.facts_confirmed === true;
-    return clean;
+    return cleanDraft(saved);
   } catch {
     return { ...defaults, actions: [""], tools: [] };
   }
@@ -39,9 +39,10 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(STEP_KEY, String(currentStep));
   const label = $("#autosave-state");
-  label.textContent = "방금 자동 저장됨";
-  window.setTimeout(() => { label.textContent = "이 브라우저에 자동 저장"; }, 1300);
+  label.textContent = authState.status === "signed_in" && syncState.consent ? "계정 저장 대기 중…" : "이 브라우저에 자동 저장";
+  scheduleServerSave();
 }
 
 function setField(name, value) {
@@ -53,6 +54,317 @@ function escapeMarkup(value) {
   return String(value ?? "").replace(/[&<>'"]/g, char => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;"
   }[char]));
+}
+
+function cleanDraft(saved) {
+  const clean = { ...defaults };
+  for (const key of FIELDS) {
+    if (Object.hasOwn(saved || {}, key)) clean[key] = saved[key];
+  }
+  clean.actions = Array.isArray(clean.actions) && clean.actions.length ? clean.actions.slice(0, 12) : [""];
+  clean.tools = Array.isArray(clean.tools) ? clean.tools.slice(0, 12) : [];
+  clean.facts_confirmed = clean.facts_confirmed === true;
+  return clean;
+}
+
+function getClientKey() {
+  let value = localStorage.getItem(CLIENT_KEY);
+  if (!value) {
+    value = self.crypto?.randomUUID?.() || `draft_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(CLIENT_KEY, value);
+  }
+  return value;
+}
+
+function hasDraftContent(draft = state) {
+  const textFields = FIELDS.filter(key => !["document_type", "style", "target_length", "actions", "tools", "facts_confirmed"].includes(key));
+  return textFields.some(key => String(draft[key] || "").trim()) ||
+    (draft.actions || []).some(Boolean) || (draft.tools || []).some(Boolean) || draft.facts_confirmed === true;
+}
+
+function sameDraft(left, right) {
+  const project = value => Object.fromEntries(FIELDS.map(key => [key, cleanDraft(value)[key]]));
+  return JSON.stringify(project(left)) === JSON.stringify(project(right));
+}
+
+function csrfToken() {
+  const item = document.cookie.split(";").map(value => value.trim()).find(value => value.startsWith("jobandkill_csrf="));
+  return item ? decodeURIComponent(item.split("=").slice(1).join("=")) : "";
+}
+
+async function api(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (options.csrf) headers.set("X-CSRF-Token", csrfToken());
+  const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.error?.message || "요청을 처리하지 못했습니다.");
+    error.code = data.error?.code || "request_failed";
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+function updateAuthUI() {
+  const signedIn = authState.status === "signed_in";
+  $("#open-auth").textContent = signedIn ? "내 계정" : "로그인";
+  $("#signed-out-panel").hidden = signedIn;
+  $("#signed-in-panel").hidden = !signedIn;
+  $("#account-email").textContent = signedIn ? authState.user.email : "";
+  $("#privacy-copy").textContent = signedIn && syncState.consent
+    ? "작성 내용은 동의 후 계정에도 저장되며, 확인하지 않은 정보는 만들지 않습니다."
+    : "작성 내용은 이 브라우저에 임시 저장되며, 확인하지 않은 정보는 만들지 않습니다.";
+  if (!signedIn) $("#autosave-state").textContent = "이 브라우저에 자동 저장";
+}
+
+function showSyncNotice(mode, serverDraft = null, draftsMatch = false) {
+  syncState.pendingMode = mode;
+  syncState.pendingServer = serverDraft;
+  const notice = $("#sync-notice");
+  notice.hidden = false;
+  if (mode === "upload") {
+    $("#sync-notice-copy").textContent = "이 브라우저의 초안을 계정에도 저장할까요? 동의하기 전에는 서버로 보내지 않습니다.";
+    $("#keep-local-draft").textContent = "계정에도 저장";
+    $("#use-server-draft").hidden = true;
+  } else if (mode === "conflict") {
+    $("#sync-notice-copy").textContent = draftsMatch
+      ? "이 브라우저와 연결된 계정 초안을 찾았습니다. 계정 저장을 계속하려면 직접 선택해 주세요."
+      : "이 브라우저와 계정의 초안이 다릅니다. 사용할 내용을 직접 선택해 주세요.";
+    $("#keep-local-draft").textContent = draftsMatch ? "계정 저장 계속" : "이 기기 내용 사용";
+    $("#use-server-draft").hidden = draftsMatch;
+  } else {
+    $("#sync-notice-copy").textContent = "다른 기기에 저장된 계정 초안이 있습니다. 불러오거나 이 기기 내용을 새 초안으로 저장해 주세요.";
+    $("#keep-local-draft").textContent = "이 기기 내용을 새로 저장";
+    $("#use-server-draft").hidden = false;
+  }
+}
+
+function hideSyncNotice() {
+  $("#sync-notice").hidden = true;
+  syncState.pendingMode = null;
+  syncState.pendingServer = null;
+}
+
+function hydrateFromServer(serverDraft) {
+  state = cleanDraft(serverDraft.payload);
+  currentStep = Math.min(Math.max(Number(serverDraft.current_step || 0), 0), 7);
+  syncState.draftId = serverDraft.id;
+  syncState.revision = serverDraft.revision;
+  syncState.clientKey = serverDraft.client_key;
+  syncState.consent = true;
+  localStorage.setItem(CLIENT_KEY, serverDraft.client_key);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(STEP_KEY, String(currentStep));
+  hideSyncNotice();
+  updateSelectedJob();
+  if (!$("#workspace").hidden) renderStep();
+  $("#autosave-state").textContent = "계정 내용을 불러옴";
+  updateAuthUI();
+}
+
+async function reconcileDrafts() {
+  const listing = await api("/api/user/drafts");
+  const localClientKey = getClientKey();
+  const summary = listing.items.find(item => item.client_key === localClientKey);
+  syncState.clientKey = localClientKey;
+  syncState.draftId = null;
+  syncState.revision = null;
+  syncState.consent = false;
+
+  if (summary) {
+    const serverDraft = await api(`/api/user/drafts/${summary.id}`);
+    const serverStep = Math.min(Math.max(Number(serverDraft.current_step || 0), 0), 7);
+    const draftsMatch = sameDraft(state, serverDraft.payload) && currentStep === serverStep;
+    showSyncNotice("conflict", serverDraft, draftsMatch);
+    $("#autosave-state").textContent = draftsMatch ? "계정 저장 동의 필요" : "저장 내용 선택 필요";
+    updateAuthUI();
+    return;
+  }
+
+  const otherSummary = listing.items[0];
+  if (otherSummary) {
+    const serverDraft = await api(`/api/user/drafts/${otherSummary.id}`);
+    showSyncNotice("load", serverDraft);
+    $("#autosave-state").textContent = "저장 내용 선택 필요";
+  } else {
+    showSyncNotice("upload");
+    $("#autosave-state").textContent = "계정 저장 동의 필요";
+  }
+  updateAuthUI();
+}
+
+async function loadAuth() {
+  try {
+    const data = await api("/api/me");
+    authState = data.authenticated ? { status: "signed_in", user: data.user } : { status: "signed_out", user: null };
+    updateAuthUI();
+    if (data.authenticated) await reconcileDrafts();
+  } catch {
+    authState = { status: "signed_out", user: null };
+    updateAuthUI();
+  }
+}
+
+function scheduleServerSave() {
+  if (authState.status !== "signed_in" || !syncState.consent) return;
+  syncState.dirty = true;
+  window.clearTimeout(syncState.timer);
+  syncState.timer = window.setTimeout(saveServerDraft, 900);
+}
+
+async function saveServerDraft() {
+  if (authState.status !== "signed_in" || !syncState.consent) return;
+  if (syncState.saving) {
+    syncState.dirty = true;
+    return;
+  }
+  syncState.saving = true;
+  syncState.dirty = false;
+  $("#autosave-state").textContent = "계정에 저장 중…";
+  const body = JSON.stringify({
+    client_key: syncState.clientKey, title: state.experience_title || state.target_job || "제목 없는 초안",
+    payload: state, current_step: currentStep, revision: syncState.revision
+  });
+  try {
+    const saved = syncState.draftId
+      ? await api(`/api/user/drafts/${syncState.draftId}`, { method: "PUT", body, csrf: true })
+      : await api("/api/user/drafts", { method: "POST", body, csrf: true });
+    syncState.draftId = saved.id;
+    syncState.revision = saved.revision;
+    syncState.clientKey = saved.client_key || syncState.clientKey;
+    $("#autosave-state").textContent = "계정에 저장됨";
+    updateAuthUI();
+  } catch (error) {
+    if (error.status === 401) {
+      authState = { status: "signed_out", user: null };
+      syncState.consent = false;
+      updateAuthUI();
+      $("#autosave-state").textContent = "로그인 만료 · 브라우저에는 저장됨";
+    } else if (error.status === 409) {
+      syncState.consent = false;
+      $("#autosave-state").textContent = "저장 내용 선택 필요";
+      try {
+        const latest = syncState.draftId ? await api(`/api/user/drafts/${syncState.draftId}`) : null;
+        showSyncNotice(latest ? "conflict" : "upload", latest);
+      } catch {
+        showSyncNotice("upload");
+      }
+    } else {
+      $("#autosave-state").textContent = "브라우저에는 저장됨 · 다시 시도";
+    }
+  } finally {
+    syncState.saving = false;
+    if (syncState.dirty && syncState.consent) scheduleServerSave();
+  }
+}
+
+async function keepLocalDraft() {
+  const pendingMode = syncState.pendingMode;
+  const serverDraft = syncState.pendingServer;
+  if (pendingMode === "conflict" && serverDraft?.client_key === syncState.clientKey) {
+    syncState.draftId = serverDraft.id;
+    syncState.revision = serverDraft.revision;
+    syncState.clientKey = serverDraft.client_key;
+  } else {
+    syncState.draftId = null;
+    syncState.revision = null;
+    syncState.clientKey = getClientKey();
+  }
+  syncState.consent = true;
+  hideSyncNotice();
+  updateAuthUI();
+  await saveServerDraft();
+}
+
+function useServerDraft() {
+  if (syncState.pendingServer) hydrateFromServer(syncState.pendingServer);
+}
+
+async function consumeLoginToken() {
+  const values = new URLSearchParams(window.location.hash.slice(1));
+  const token = values.get("login_token");
+  if (!token) return false;
+  history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  $("#auth-dialog").showModal();
+  $("#auth-status").textContent = "로그인 링크를 확인하고 있습니다…";
+  try {
+    const data = await api("/api/auth/verify", { method: "POST", body: JSON.stringify({ token }) });
+    authState = { status: "signed_in", user: data.user };
+    $("#auth-status").textContent = "로그인되었습니다.";
+    updateAuthUI();
+  } catch (error) {
+    $("#auth-status").textContent = error.message;
+  }
+  return true;
+}
+
+async function requestLogin(event) {
+  event.preventDefault();
+  const button = $("#request-login");
+  button.disabled = true;
+  $("#auth-status").textContent = "로그인 링크를 보내고 있습니다…";
+  $("#development-login-link").hidden = true;
+  try {
+    const data = await api("/api/auth/request", {
+      method: "POST", body: JSON.stringify({ email: $("#login-email").value })
+    });
+    $("#auth-status").textContent = data.message;
+    if (data.development_magic_link) {
+      $("#development-login-link").href = data.development_magic_link;
+      $("#development-login-link").hidden = false;
+    }
+  } catch (error) {
+    $("#auth-status").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function logout() {
+  try {
+    await api("/api/auth/logout", { method: "POST", body: "{}", csrf: true });
+  } catch (error) {
+    $("#account-status").textContent = error.message;
+    return;
+  }
+  if ($("#clear-local-on-logout").checked) {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STEP_KEY);
+    state = { ...defaults, actions: [""], tools: [] };
+    currentStep = 0;
+    updateSelectedJob();
+    if (!$("#workspace").hidden) renderStep();
+  }
+  authState = { status: "signed_out", user: null };
+  syncState = {
+    consent: false, draftId: null, revision: null, pendingServer: null, pendingMode: null,
+    clientKey: getClientKey(), timer: null, saving: false, dirty: false
+  };
+  updateAuthUI();
+  $("#auth-status").textContent = "로그아웃되었습니다.";
+}
+
+async function resetDraft() {
+  const scope = syncState.draftId && authState.status === "signed_in" ? "브라우저와 계정의" : "브라우저의";
+  if (!window.confirm(`${scope} 작성 중인 내용을 모두 지우고 처음부터 시작할까요?`)) return;
+  if (syncState.draftId && authState.status === "signed_in") {
+    try {
+      await api(`/api/user/drafts/${syncState.draftId}`, { method: "DELETE", csrf: true });
+    } catch (error) {
+      $("#form-message").textContent = `${error.message} 브라우저 내용은 지우지 않았습니다.`;
+      return;
+    }
+  }
+  state = { ...defaults, actions: [""], tools: [] };
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(STEP_KEY);
+  currentStep = 0;
+  syncState.draftId = null;
+  syncState.revision = null;
+  updateSelectedJob();
+  renderStep();
 }
 
 const stepDefinitions = [
@@ -427,6 +739,14 @@ function closeDialog(id) {
 
 function bindPage() {
   ["hero-start", "header-start"].forEach(id => $(`#${id}`).addEventListener("click", showWorkspace));
+  $("#open-auth").addEventListener("click", () => {
+    $("#auth-dialog").showModal();
+    window.setTimeout(() => authState.status === "signed_in" ? $("#logout").focus() : $("#login-email").focus(), 20);
+  });
+  $("#login-form").addEventListener("submit", requestLogin);
+  $("#logout").addEventListener("click", logout);
+  $("#keep-local-draft").addEventListener("click", keepLocalDraft);
+  $("#use-server-draft").addEventListener("click", useServerDraft);
   $("#browse-jobs").addEventListener("click", openJobDialog);
   $("#change-job").addEventListener("click", openJobDialog);
   $("#open-sources").addEventListener("click", () => { $("#source-dialog").showModal(); loadSources(); });
@@ -440,23 +760,17 @@ function bindPage() {
     window.setTimeout(() => $("#target_job")?.focus(), 50);
   });
   $("#previous-step").addEventListener("click", () => {
-    if (currentStep > 0) { currentStep -= 1; renderStep(); }
+    if (currentStep > 0) { currentStep -= 1; saveState(); renderStep(); }
   });
   $("#next-step").addEventListener("click", () => {
     if (currentStep < stepDefinitions.length - 1) {
       currentStep += 1;
+      saveState();
       renderStep();
       $("#builder-title").focus?.();
     } else composeDraft();
   });
-  $("#reset-draft").addEventListener("click", () => {
-    if (!window.confirm("작성 중인 내용을 모두 지우고 처음부터 시작할까요?")) return;
-    state = { ...defaults, actions: [""], tools: [] };
-    localStorage.removeItem(STORAGE_KEY);
-    currentStep = 0;
-    updateSelectedJob();
-    renderStep();
-  });
+  $("#reset-draft").addEventListener("click", resetDraft);
   $("#copy-draft").addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText($("#draft-output").textContent);
@@ -474,3 +788,7 @@ function bindPage() {
 
 bindPage();
 loadHealth();
+(async () => {
+  await consumeLoginToken();
+  await loadAuth();
+})();

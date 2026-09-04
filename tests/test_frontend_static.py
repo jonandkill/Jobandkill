@@ -44,12 +44,41 @@ class FrontendStaticTests(unittest.TestCase):
         for rule in ("max-width: 900px", "max-width: 640px", "max-width: 360px", "prefers-reduced-motion"):
             self.assertIn(rule, css)
         self.assertIn("min-height: 44px", css)
+        self.assertIn(".builder-nav .autosave-state", css)
+        self.assertNotIn(".autosave-state { display: none; }", css)
+
+    def test_login_and_sync_controls_are_accessible_without_blocking_builder(self) -> None:
+        markup = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        for required in (
+            'id="open-auth"', 'id="auth-dialog"', 'id="sync-notice"',
+            'id="autosave-state" role="status"', 'id="builder-title" tabindex="-1"',
+        ):
+            self.assertIn(required, markup)
 
     def test_javascript_never_sends_drafts_outside_same_origin(self) -> None:
         javascript = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         self.assertNotIn("http://", javascript)
         self.assertNotIn("https://", javascript)
         self.assertIn('fetch("/api/drafts/compose"', javascript)
+        self.assertIn("history.replaceState", javascript)
+        self.assertNotIn('localStorage.setItem("login_token"', javascript)
+
+    def test_account_sync_is_explicit_and_scoped_to_the_client_key(self) -> None:
+        javascript = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("pendingMode: null", javascript)
+        self.assertIn("clientKey: getClientKey()", javascript)
+        self.assertIn("item.client_key === localClientKey", javascript)
+        self.assertNotIn("|| listing.items[0]", javascript)
+        self.assertIn("client_key: syncState.clientKey", javascript)
+        self.assertIn("syncState.clientKey = serverDraft.client_key", javascript)
+        self.assertIn('pendingMode === "conflict"', javascript)
+        self.assertIn('showSyncNotice("load", serverDraft)', javascript)
+        reconciliation = javascript.split("async function reconcileDrafts()", 1)[1].split("async function loadAuth()", 1)[0]
+        self.assertNotIn("syncState.consent = true", reconciliation)
+        self.assertNotIn("hydrateFromServer(", reconciliation)
+        keep_local = javascript.split("async function keepLocalDraft()", 1)[1].split("function useServerDraft()", 1)[0]
+        for reset in ("syncState.draftId = null", "syncState.revision = null", "syncState.clientKey = getClientKey()"):
+            self.assertIn(reset, keep_local)
 
 
 if __name__ == "__main__":
