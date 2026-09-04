@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="공공기관 직무 근거를 바탕으로 실제 경험만 구조화하는 경력·경험기술서 작성 도구">
+    <title>Job&Kill — 공공기관 직무 아카이브</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 바로가기</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Job and Kill 홈">
+        <span class="brand-mark" aria-hidden="true">J&K</span>
+        <span class="brand-name">JOB<span>&</span>KILL</span>
+        <span class="brand-edition">PUBLIC</span>
+      </a>
+      <nav class="header-actions" aria-label="주요 메뉴">
+        <button class="status-chip" id="open-sources" type="button">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="status-label">데이터 확인 중</span>
+        </button>
+        <button class="button button-dark button-small" id="header-start" type="button">작성 시작</button>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span>01</span> 공공기관 직무 아카이브</p>
+          <h1 id="hero-title">공고를 읽는 시간을,<br><em>경험을 쓰는 시간</em>으로.</h1>
+          <p class="hero-lede">
+            공식 채용공고와 NCS 직무 근거는 미리 축적합니다. 당신은 직무를 고르고,
+            직접 한 일을 하나씩 답하면 됩니다.
+          </p>
+          <div class="hero-actions">
+            <button class="button button-accent" id="hero-start" type="button">
+              내 기술서 작성하기 <span aria-hidden="true">↗</span>
+            </button>
+            <button class="text-button" id="browse-jobs" type="button">축적된 직무 둘러보기 <span aria-hidden="true">→</span></button>
+          </div>
+          <dl class="stats" aria-label="수집 현황">
+            <div>
+              <dt id="stat-institutions">—</dt>
+              <dd>수집 기관</dd>
+            </div>
+            <div>
+              <dt id="stat-postings">—</dt>
+              <dd>채용공고</dd>
+            </div>
+            <div>
+              <dt id="stat-profiles">—</dt>
+              <dd>직무 프로필</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="hero-system" aria-label="데이터 처리 흐름">
+          <div class="system-heading">
+            <span>LIVE KNOWLEDGE BASE</span>
+            <span class="system-pulse" aria-hidden="true"></span>
+          </div>
+          <ol class="pipeline">
+            <li>
+              <span class="pipeline-number">01</span>
+              <div><strong>공식 소스 수집</strong><small>공공데이터포털 · JOB-ALIO · NCS</small></div>
+              <span class="pipeline-state">자동</span>
+            </li>
+            <li>
+              <span class="pipeline-number">02</span>
+              <div><strong>권리·출처 검증</strong><small>이용범위 · 원문 링크 · 수집 시각</small></div>
+              <span class="pipeline-state">필수</span>
+            </li>
+            <li>
+              <span class="pipeline-number">03</span>
+              <div><strong>직무 정보 구조화</strong><small>업무 · 지식 · 기술 · 태도 · 자격</small></div>
+              <span class="pipeline-state">근거</span>
+            </li>
+            <li>
+              <span class="pipeline-number">04</span>
+              <div><strong>실제 경험 연결</strong><small>상황 · 판단 · 행동 · 결과 · 기여</small></div>
+              <span class="pipeline-state pipeline-state-accent">작성</span>
+            </li>
+          </ol>
+          <div class="system-footer">
+            <span>NO FABRICATION</span>
+            <p>입력하지 않은 성과는 <b>[확인 필요]</b>로 남깁니다.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" id="workspace" aria-labelledby="builder-title" hidden>
+        <aside class="target-panel">
+          <p class="eyebrow eyebrow-light"><span>02</span> 목표 직무</p>
+          <h2>무엇을 기준으로<br>쓸까요?</h2>
+          <p>축적된 직무를 선택하면 공식 직무수행내용과 필요기술을 작성 기준으로 가져옵니다.</p>
+
+          <div class="selected-job" id="selected-job" aria-live="polite">
+            <span class="selected-job-label">SELECTED ROLE</span>
+            <strong id="selected-job-title">직무를 아직 선택하지 않았습니다</strong>
+            <span id="selected-job-institution">직접 입력해도 작성할 수 있어요.</span>
+            <div class="job-tags" id="selected-job-tags"></div>
+          </div>
+          <button class="button button-outline-light button-full" id="change-job" type="button">직무 검색·변경</button>
+
+          <div class="privacy-note">
+            <span aria-hidden="true">◇</span>
+            <p><strong>사실 기반 작성</strong>작성 내용은 이 브라우저에 임시 저장되며, 확인하지 않은 정보는 만들지 않습니다.</p>
+          </div>
+        </aside>
+
+        <article class="builder-card">
+          <div class="builder-topline">
+            <div>
+              <p class="step-kicker" id="step-kicker">STEP 1 OF 8</p>
+              <h2 id="builder-title">작성 형식을 골라주세요.</h2>
+            </div>
+            <button class="reset-button" id="reset-draft" type="button">처음부터</button>
+          </div>
+
+          <div class="progress-track" role="progressbar" aria-label="작성 진행률" aria-valuemin="1" aria-valuemax="8" aria-valuenow="1">
+            <span id="progress-bar"></span>
+          </div>
+
+          <div class="step-content" id="step-content"></div>
+          <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
+
+          <div class="builder-nav">
+            <button class="button button-quiet" id="previous-step" type="button">← 이전</button>
+            <span class="autosave-state" id="autosave-state">이 브라우저에 자동 저장</span>
+            <button class="button button-dark" id="next-step" type="button">다음 →</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="principles" aria-labelledby="principles-title">
+        <div class="section-heading">
+          <p class="eyebrow"><span>03</span> 작성 원칙</p>
+          <h2 id="principles-title">잘 쓰는 것보다 먼저,<br>사실대로 쓰게 합니다.</h2>
+        </div>
+        <div class="principle-grid">
+          <article><span>FACT</span><h3>사용자 사실 우선</h3><p>팀의 성과와 본인이 직접 책임진 범위를 구분해 묻습니다.</p></article>
+          <article><span>TRACE</span><h3>근거까지 추적</h3><p>직무 정보마다 공식 원문, 수집 시각, 추출 위치를 함께 보관합니다.</p></article>
+          <article><span>RIGHTS</span><h3>권리 상태별 차단</h3><p>재사용 허용이 확인되지 않은 PDF는 원문 링크만 제공하고 복제하지 않습니다.</p></article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="brand brand-footer"><span class="brand-mark">J&K</span><span class="brand-name">JOB<span>&</span>KILL</span></div>
+      <p>공식 직무 근거와 나의 실제 경험 사이를 연결합니다.</p>
+      <button class="text-button text-button-light" id="footer-sources" type="button">데이터 출처 및 이용범위</button>
+    </footer>
+
+    <dialog class="modal job-modal" id="job-dialog" aria-labelledby="job-dialog-title">
+      <div class="modal-header">
+        <div><p class="step-kicker">JOB ARCHIVE</p><h2 id="job-dialog-title">목표 직무 찾기</h2></div>
+        <button class="icon-button" data-close-dialog="job-dialog" type="button" aria-label="닫기">×</button>
+      </div>
+      <form class="search-form" id="job-search-form" role="search">
+        <label for="job-search">기관명이나 직무명을 입력하세요.</label>
+        <div class="search-control">
+          <input id="job-search" type="search" placeholder="예: 사무행정, 전기, 한국산림복지진흥원" autocomplete="off">
+          <button class="button button-dark" type="submit">검색</button>
+        </div>
+      </form>
+      <div class="search-state" id="job-search-state" role="status" aria-live="polite"></div>
+      <div class="job-results" id="job-results"></div>
+      <div class="manual-choice">
+        <p><strong>아직 수집되지 않은 공고인가요?</strong>직무명을 직접 입력해도 나머지 작성 단계는 그대로 진행됩니다.</p>
+        <button class="button button-quiet" id="use-manual-job" type="button">직접 입력하기</button>
+      </div>
+    </dialog>
+
+    <dialog class="modal source-modal" id="source-dialog" aria-labelledby="source-dialog-title">
+      <div class="modal-header">
+        <div><p class="step-kicker">SOURCE LEDGER</p><h2 id="source-dialog-title">데이터 출처와 권리 상태</h2></div>
+        <button class="icon-button" data-close-dialog="source-dialog" type="button" aria-label="닫기">×</button>
+      </div>
+      <p class="modal-intro">공개 열람과 상업적 재배포는 다릅니다. 각 소스의 메타데이터와 첨부문서를 분리해 관리합니다.</p>
+      <div class="source-list" id="source-list" aria-live="polite"><p class="loading-line">출처를 확인하고 있습니다…</p></div>
+      <a class="policy-link" id="copyright-policy" href="https://www.ncs.go.kr/unity/th01/selectPolicyPopView.do" target="_blank" rel="noopener noreferrer">NCS 저작권정책 원문 보기 ↗</a>
+    </dialog>
+
+    <dialog class="modal result-modal" id="result-dialog" aria-labelledby="result-dialog-title">
+      <div class="modal-header">
+        <div><p class="step-kicker">YOUR DRAFT</p><h2 id="result-dialog-title">초안이 완성됐습니다.</h2></div>
+        <button class="icon-button" data-close-dialog="result-dialog" type="button" aria-label="닫기">×</button>
+      </div>
+      <div class="result-score"><span id="fact-coverage">0%</span><p><strong>사실 입력 완성도</strong>비어 있는 항목은 [확인 필요]로 표시합니다.</p></div>
+      <div class="warning-list" id="warning-list"></div>
+      <pre class="draft-output" id="draft-output" tabindex="0"></pre>
+      <div class="result-actions">
+        <button class="button button-accent" id="copy-draft" type="button">초안 복사</button>
+        <button class="button button-quiet" data-close-dialog="result-dialog" type="button">계속 수정</button>
+      </div>
+    </dialog>
+  </body>
+</html>
