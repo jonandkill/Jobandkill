@@ -6,7 +6,8 @@
     <meta name="description" content="공공기관 직무 근거를 바탕으로 실제 경험만 구조화하는 경력·경험기술서 작성 도구">
     <title>Job&Kill — 공공기관 직무 아카이브</title>
     <link rel="stylesheet" href="/styles.css">
-    <script src="/app.js" defer></script>
+    <script src="/composer.js?v=20260905-privacy3" defer></script>
+    <script src="/app.js?v=20260905-privacy3" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">본문으로 바로가기</a>
@@ -134,11 +135,17 @@
           </div>
 
           <div class="step-content" id="step-content"></div>
+          <div class="draft-privacy" role="note">
+            <label><input id="remember-draft" type="checkbox"> 이 기기에 30일 동안 초안 보관</label>
+            <p id="draft-storage-status">기본값은 이 탭을 닫으면 지워집니다. 공용·공개 기기에서는 30일 보관을 사용하지 마세요. 보관 기간이 지난 초안은 다음 방문 시 삭제됩니다.</p>
+            <p id="sensitive-data-warning">주민등록번호, 계좌번호, 건강·장애 등 작성에 불필요한 민감정보는 입력하지 마세요.</p>
+            <p id="input-length-warning">입력란별 글자 수 제한을 넘는 내용은 저장하거나 초안을 만들 수 없습니다. 자동으로 잘라 저장하지 않습니다.</p>
+          </div>
           <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
 
           <div class="builder-nav">
             <button class="button button-quiet" id="previous-step" type="button">← 이전</button>
-            <span class="autosave-state" id="autosave-state" role="status" aria-live="polite" aria-atomic="true">이 브라우저에 자동 저장</span>
+            <span class="autosave-state" id="autosave-state" role="status" aria-live="polite" aria-atomic="true">이 탭에 자동 저장</span>
             <button class="button button-dark" id="next-step" type="button">다음 →</button>
           </div>
         </article>
@@ -203,6 +210,20 @@
         <form class="auth-form" id="login-form">
           <label for="login-email">이메일</label>
           <input id="login-email" name="email" type="email" autocomplete="email" inputmode="email" required placeholder="name@example.com">
+          <fieldset class="login-consents" id="login-consents">
+            <legend>로그인 전 확인</legend>
+            <p id="privacy-consent-copy">로그인 링크를 요청하려면 아래 안내를 확인해 주세요.</p>
+            <label class="consent-option" for="privacy-policy-accepted">
+              <input id="privacy-policy-accepted" type="checkbox" required>
+              <span><a id="privacy-policy-link" href="#" target="_blank" rel="noopener noreferrer">개인정보 처리방침 안내</a>를 확인하고 동의합니다.</span>
+            </label>
+            <small id="privacy-policy-version">안내 정보를 불러오는 중입니다.</small>
+            <label class="consent-option" id="overseas-transfer-consent" for="overseas-transfer-accepted" hidden>
+              <input id="overseas-transfer-accepted" type="checkbox">
+              <span><a id="overseas-transfer-link" href="#" target="_blank" rel="noopener noreferrer">국외 이전 안내</a>를 확인하고 동의합니다.</span>
+            </label>
+            <small id="overseas-transfer-version" hidden></small>
+          </fieldset>
           <button class="button button-dark" id="request-login" type="submit">로그인 링크 받기</button>
         </form>
         <p class="auth-status" id="auth-status" role="status" aria-live="polite"></p>
@@ -214,8 +235,16 @@
         <strong id="account-email"></strong>
         <p>동의한 초안은 계정에 저장되어 다른 기기에서도 이어서 쓸 수 있습니다.</p>
         <p class="auth-status" id="account-status" role="status" aria-live="polite"></p>
-        <label class="logout-option"><input id="clear-local-on-logout" type="checkbox"> 로그아웃할 때 이 브라우저의 초안도 지우기</label>
-        <button class="button button-quiet" id="logout" type="button">로그아웃</button>
+        <div class="account-actions">
+          <button class="button button-quiet" id="export-account" type="button">내 데이터 내려받기</button>
+          <button class="button button-quiet" id="delete-all-drafts" type="button">저장 초안 모두 삭제</button>
+          <button class="button button-quiet" id="logout" type="button">로그아웃</button>
+        </div>
+        <div class="delete-account">
+          <strong>계정 삭제</strong>
+          <p>운영 DB의 계정·초안·로그인 기록을 삭제합니다. 백업은 정해진 보존기간 뒤 제거되며, 다른 기기의 브라우저 초안은 각 기기에서 별도로 삭제해야 합니다.</p>
+          <button class="button button-danger" id="delete-account" type="button">계정·운영 데이터 삭제</button>
+        </div>
       </section>
     </dialog>
 

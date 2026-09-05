@@ -1,11 +1,33 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 
 MISSING = "[확인 필요]"
 MAX_INPUT_LENGTH = 4_000
+TEXT_LIMITS = {
+    "institution": 300,
+    "target_job": 300,
+    "ncs_path": 1_000,
+    "matched_duty": 1_000,
+    "matched_skill": 1_000,
+    "experience_title": 300,
+    "organization": 300,
+    "period_start": 30,
+    "period_end": 30,
+    "role": 500,
+    "situation": MAX_INPUT_LENGTH,
+    "objective": MAX_INPUT_LENGTH,
+    "judgment": MAX_INPUT_LENGTH,
+    "collaboration": MAX_INPUT_LENGTH,
+    "result": MAX_INPUT_LENGTH,
+    "evidence": MAX_INPUT_LENGTH,
+    "contribution": MAX_INPUT_LENGTH,
+    "learning": MAX_INPUT_LENGTH,
+}
+RESIDENT_REGISTRATION_NUMBER = re.compile(r"(?<!\d)\d{6}\s*-?\s*[1-8]\d{6}(?!\d)")
 
 BLIND_PATTERNS: dict[str, re.Pattern[str]] = {
     "출신학교": re.compile(r"(?:대학교|대학원|고등학교|출신학교|학번)"),
@@ -42,6 +64,24 @@ def _items(value: Any, maximum: int = 12) -> list[str]:
     return result[:maximum]
 
 
+def _normalized_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return " ".join(str(value).replace("\x00", " ").split())
+
+
+def _item_values(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        return re.split(r"\n+|\s*[;|]\s*", value)
+    return []
+
+
+def contains_resident_registration_number(value: Any) -> bool:
+    return bool(RESIDENT_REGISTRATION_NUMBER.search(unicodedata.normalize("NFKC", str(value or ""))))
+
+
 def sanitize_draft(payload: dict[str, Any], require_confirmation: bool = False) -> dict[str, Any]:
     errors: dict[str, str] = {}
     document_type = _text(payload.get("document_type"), 30)
@@ -52,6 +92,21 @@ def sanitize_draft(payload: dict[str, Any], require_confirmation: bool = False) 
         errors["style"] = "개조식 또는 스토리텔링을 선택해 주세요."
     if require_confirmation and payload.get("facts_confirmed") is not True:
         errors["facts_confirmed"] = "입력한 내용이 실제 경험이라는 확인이 필요합니다."
+    for field, limit in TEXT_LIMITS.items():
+        if len(_normalized_text(payload.get(field))) > limit:
+            errors[field] = f"{field} 입력은 {limit:,}자 이하여야 합니다."
+    for field in ("actions", "tools"):
+        values = _item_values(payload.get(field))
+        if len(values) > 12:
+            errors[field] = f"{field} 항목은 최대 12개까지 입력할 수 있습니다."
+        elif any(len(_normalized_text(item)) > 1_000 for item in values):
+            errors[field] = f"{field}의 각 항목은 1,000자 이하여야 합니다."
+    sensitive_text = " ".join(
+        [_normalized_text(payload.get(field)) for field in TEXT_LIMITS]
+        + [_normalized_text(item) for field in ("actions", "tools") for item in _item_values(payload.get(field))]
+    )
+    if contains_resident_registration_number(sensitive_text):
+        errors["personal_information"] = "주민등록번호는 입력하거나 저장할 수 없습니다."
     try:
         target_length = int(payload.get("target_length", 800))
     except (TypeError, ValueError):

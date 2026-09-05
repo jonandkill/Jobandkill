@@ -2,6 +2,15 @@ __pycache__/
 *.py[cod]
 .env*
 !.env.example
+.pgpass
+.psql_history
+.netrc
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
 .venv/
 data/*.db
 data/*.db-*

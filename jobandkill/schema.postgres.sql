@@ -1,3 +1,9 @@
+CREATE TABLE IF NOT EXISTS app_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS sources (
     id BIGSERIAL PRIMARY KEY,
     slug TEXT NOT NULL UNIQUE,
@@ -206,12 +212,29 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS user_consents (
+    id BIGSERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    consent_type TEXT NOT NULL CHECK (consent_type IN ('privacy_policy', 'overseas_transfer')),
+    policy_version TEXT NOT NULL,
+    notice_url TEXT NOT NULL,
+    notice_sha256 TEXT NOT NULL,
+    request_token_hash TEXT NOT NULL,
+    accepted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    verified_at TIMESTAMPTZ,
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS user_consents_user_accepted_idx ON user_consents(user_id, accepted_at);
+CREATE INDEX IF NOT EXISTS user_consents_request_idx ON user_consents(request_token_hash);
+CREATE INDEX IF NOT EXISTS user_consents_pending_idx ON user_consents(verified_at, accepted_at);
+
 CREATE TABLE IF NOT EXISTS login_tokens (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ NOT NULL,
     used_at TIMESTAMPTZ,
     request_subject_hash TEXT NOT NULL DEFAULT '',
+    intent_hash TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS login_tokens_expiry_idx ON login_tokens(expires_at);

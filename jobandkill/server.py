@@ -5,6 +5,8 @@ import ipaddress
 import mimetypes
 import os
 import re
+import secrets
+import sys
 from datetime import date, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,11 +18,18 @@ from .auth import (
     AuthError,
     Session,
     clear_cookie_headers,
+    clear_login_intent_cookie_header,
     cookie_headers,
     create_draft,
+    delete_account,
+    delete_all_drafts,
     delete_draft,
+    export_user_data,
     get_draft,
     list_drafts,
+    login_intent_cookie_header,
+    login_intent_from_cookie,
+    normalize_email,
     origin_is_allowed,
     request_magic_link,
     revoke_session,
@@ -29,12 +38,31 @@ from .auth import (
     verify_csrf,
     verify_magic_link,
 )
-from .db import ROOT, Connection, DatabaseTarget, connect, get_profile, initialize, list_sources, public_stats, search_profiles
+from .db import (
+    ROOT,
+    Connection,
+    DatabaseTarget,
+    connect,
+    get_profile,
+    initialize,
+    list_sources,
+    public_stats,
+    search_profiles,
+)
+from .privacy import (
+    PrivacyError,
+    login_consents,
+    public_privacy_config,
+    record_login_consents,
+    require_current_consents,
+    verify_login_consents,
+)
 from .writer import DraftValidationError, compose
 
 
 WEB_ROOT = (ROOT / "web").resolve()
 MAX_REQUEST_BYTES = 64 * 1024
+MAX_SEARCH_OFFSET = 1_000
 
 
 def _json_default(value: Any) -> str:
@@ -51,6 +79,8 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        if os.getenv("JOBNKILL_ENV", "development").strip().lower() == "production":
+            self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
@@ -59,8 +89,15 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, format: str, *args: Any) -> None:
-        if os.getenv("JOBNKILL_QUIET", "0") != "1":
-            super().log_message(format, *args)
+        if os.getenv("JOBNKILL_QUIET", "0") == "1":
+            return
+        path = urlsplit(self.path).path
+        path = re.sub(r"(/api/user/drafts/)[0-9a-f-]{36}$", r"\1:id", path)
+        status = str(args[1]) if len(args) > 1 else "-"
+        print(
+            json.dumps({"event": "http_request", "method": self.command, "path": path, "status": status}),
+            file=sys.stderr,
+        )
 
     def _json(self, status: int, payload: Any, headers: list[tuple[str, str]] | None = None) -> None:
         body = json.dumps(
@@ -158,13 +195,18 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlsplit(self.path)
+        if parsed.path == "/api/drafts/compose" and os.getenv("JOBNKILL_ENV", "development").strip().lower() == "production":
+            self._error(HTTPStatus.NOT_FOUND, "browser_compose_only", "초안 작성은 브라우저 안에서만 처리됩니다.")
+            return
         payload = self._read_json()
         if payload is None:
             return
         if parsed.path == "/api/drafts/compose":
             self._compose(payload)
             return
-        if parsed.path.startswith("/api/auth/") or parsed.path == "/api/user/drafts":
+        if parsed.path.startswith("/api/auth/") or parsed.path in {
+            "/api/user/drafts", "/api/user/export", "/api/user/delete-account",
+        }:
             self._api_post(parsed.path, payload)
             return
         self._error(HTTPStatus.NOT_FOUND, "not_found", "요청한 API를 찾을 수 없습니다.")
@@ -181,6 +223,7 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
         try:
             with connect(self.server.db_target) as connection:  # type: ignore[attr-defined]
                 session = self._session(connection, csrf=True)
+                require_current_consents(connection, session.user_id)
                 response = update_draft(connection, session, match.group(1), payload)
         except AuthError as error:
             self._error(error.status, error.code, str(error))
@@ -193,7 +236,8 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
     def do_DELETE(self) -> None:
         path = urlsplit(self.path).path
         match = re.fullmatch(r"/api/user/drafts/([0-9a-f-]{36})", path)
-        if not match:
+        delete_all = path == "/api/user/drafts"
+        if not match and not delete_all:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "요청한 API를 찾을 수 없습니다.")
             return
         if not self._origin_ok():
@@ -201,14 +245,20 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
         try:
             with connect(self.server.db_target) as connection:  # type: ignore[attr-defined]
                 session = self._session(connection, csrf=True)
-                delete_draft(connection, session, match.group(1))
+                deleted = (
+                    delete_all_drafts(connection, session)
+                    if delete_all else (delete_draft(connection, session, match.group(1)) or 1)
+                )
         except AuthError as error:
             self._error(error.status, error.code, str(error))
             return
         except Exception:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "request_failed", "요청을 처리하지 못했습니다.")
             return
-        self._json(HTTPStatus.OK, {"deleted": True})
+        response: dict[str, Any] = {"deleted": True}
+        if delete_all:
+            response["count"] = deleted
+        self._json(HTTPStatus.OK, response)
 
     def _compose(self, payload: dict[str, Any]) -> None:
         try:
@@ -223,6 +273,7 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
             return
         if path not in {
             "/api/auth/request", "/api/auth/verify", "/api/auth/logout", "/api/user/drafts",
+            "/api/user/export", "/api/user/delete-account",
         }:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "요청한 API를 찾을 수 없습니다.")
             return
@@ -233,22 +284,52 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
         try:
             with connect(self.server.db_target) as connection:  # type: ignore[attr-defined]
                 if path == "/api/auth/request":
-                    response = request_magic_link(connection, payload.get("email"), self._request_ip())
+                    # This check happens before request_magic_link can create a user or persist an email.
+                    consents = login_consents(payload)
+                    email = normalize_email(payload.get("email"))
+                    intent_token = secrets.token_urlsafe(32)
+                    response = request_magic_link(
+                        connection, email, self._request_ip(), intent_token,
+                        before_commit=lambda user_id, token_hash: record_login_consents(
+                            connection, user_id, token_hash, consents
+                        ),
+                    )
+                    headers = [("Set-Cookie", login_intent_cookie_header(intent_token))]
                     status = HTTPStatus.ACCEPTED
                 elif path == "/api/auth/verify":
-                    result = verify_magic_link(connection, payload.get("token"))
+                    result = verify_magic_link(
+                        connection,
+                        payload.get("token"),
+                        login_intent_from_cookie(self.headers.get("Cookie")),
+                        after_verify=lambda user_id, token_hash: verify_login_consents(
+                            connection, user_id, token_hash
+                        ),
+                    )
                     headers = [("Set-Cookie", value) for value in cookie_headers(result)]
-                    response = {"authenticated": True, "user": {"email": result.email}}
+                    headers.append(("Set-Cookie", clear_login_intent_cookie_header()))
+                    response = {
+                        "authenticated": True,
+                        "user": {"id": result.user_id, "email": result.email},
+                    }
                 elif path == "/api/auth/logout":
                     session = self._session(connection, csrf=True)
                     revoke_session(connection, session)
                     headers = [("Set-Cookie", value) for value in clear_cookie_headers()]
                     response = {"authenticated": False}
+                elif path == "/api/user/export":
+                    session = self._session(connection, csrf=True)
+                    response = export_user_data(connection, session)
+                elif path == "/api/user/delete-account":
+                    session = self._session(connection, csrf=True)
+                    delete_account(connection, session, payload.get("confirmation"))
+                    headers = [("Set-Cookie", value) for value in clear_cookie_headers()]
+                    response = {"deleted": True}
                 else:
                     session = self._session(connection, csrf=True)
+                    require_current_consents(connection, session.user_id)
                     response = create_draft(connection, session, payload)
                     status = HTTPStatus.CREATED
-        except AuthError as error:
+        except (AuthError, PrivacyError) as error:
             self._error(error.status, error.code, str(error))
             return
         except Exception:
@@ -264,6 +345,13 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
             except ValueError:
                 self._error(HTTPStatus.BAD_REQUEST, "pagination", "limit과 offset은 숫자여야 합니다.")
                 return
+            if offset < 0 or offset > MAX_SEARCH_OFFSET:
+                self._error(
+                    HTTPStatus.BAD_REQUEST,
+                    "pagination",
+                    f"offset은 0~{MAX_SEARCH_OFFSET:,} 범위여야 합니다.",
+                )
+                return
 
         response: Any = None
         route_found = False
@@ -271,12 +359,19 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
             with connect(self.server.db_target) as connection:  # type: ignore[attr-defined]
                 if path == "/api/health":
                     route_found = True
-                    response = {"status": "ok", "version": "0.2.0", "stats": public_stats(connection)}
+                    response = {"status": "ok"}
+                elif path == "/api/stats":
+                    route_found = True
+                    response = {"stats": public_stats(connection)}
+                elif path == "/api/privacy-config":
+                    route_found = True
+                    response = public_privacy_config()
                 elif path == "/api/me":
                     route_found = True
                     session = session_from_cookie(connection, self.headers.get("Cookie"))
                     response = {"authenticated": False} if not session else {
-                        "authenticated": True, "user": {"email": session.email}
+                        "authenticated": True,
+                        "user": {"id": session.user_id, "email": session.email},
                     }
                 elif path == "/api/sources":
                     route_found = True
@@ -307,7 +402,7 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
                     response = get_profile(connection, int(match.group(1)))
                     if not response:
                         raise AuthError("job_not_found", "직무 정보를 찾을 수 없습니다.", 404)
-        except AuthError as error:
+        except (AuthError, PrivacyError) as error:
             self._error(error.status, error.code, str(error))
             return
         except Exception:
@@ -338,7 +433,8 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
             f"{media_type}; charset=utf-8" if media_type.startswith("text/") or media_type.endswith("javascript") else media_type,
         )
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache" if candidate.name == "index.html" else "public, max-age=3600")
+        revalidate = candidate.name == "index.html" or candidate.suffix in {".js", ".css"}
+        self.send_header("Cache-Control", "no-cache" if revalidate else "public, max-age=3600")
         self.end_headers()
         self.wfile.write(body)
 

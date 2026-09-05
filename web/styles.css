@@ -370,6 +370,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .builder-nav .button:last-child { justify-self: end; }
 .is-invisible { visibility: hidden; }
 .autosave-state { color: var(--muted); font-size: 10px; text-align: center; }
+.draft-privacy { margin: 18px 0 0; padding: 13px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.draft-privacy label { display: flex; min-height: 44px; align-items: center; gap: 9px; color: var(--navy); font-size: 12px; font-weight: 800; cursor: pointer; }
+.draft-privacy input { width: 18px; height: 18px; accent-color: var(--accent); }
+.draft-privacy p { margin: 7px 0 0 27px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.draft-privacy input:disabled { cursor: not-allowed; opacity: .55; }
+.draft-privacy label:has(input:disabled) { color: var(--muted); cursor: not-allowed; }
 .sync-notice { margin: -15px 0 24px; padding: 16px; border: 1px solid rgba(183,144,83,.42); border-radius: 8px; background: #fbf3e5; }
 .sync-notice p { margin: 0; color: #61513a; font-size: 12px; }
 .sync-notice > div { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -436,12 +442,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .auth-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: end; }
 .auth-form label { grid-column: 1 / -1; color: var(--navy); font-size: 12px; font-weight: 800; }
 .auth-form input { min-width: 0; min-height: 50px; padding: 0 14px; border: 1px solid var(--line); border-radius: 7px; }
+.login-consents { grid-column: 1 / -1; margin: 4px 0 2px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 7px; }
+.login-consents legend { padding: 0 5px; color: var(--navy); font-size: 11px; font-weight: 850; }
+.login-consents p { margin: 0 0 10px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.consent-option { display: flex !important; grid-column: auto !important; gap: 9px; align-items: flex-start; color: var(--ink) !important; font-size: 12px !important; font-weight: 500 !important; line-height: 1.5; cursor: pointer; }
+.consent-option + .consent-option { margin-top: 10px; }
+.consent-option input { width: 18px; min-width: 18px; min-height: 18px; margin: 1px 0 0; padding: 0; accent-color: var(--accent); }
+.consent-option a { color: var(--navy); font-weight: 800; text-underline-offset: 2px; }
+.consent-option a:not([href]) { color: var(--muted); cursor: default; text-decoration: none; }
+.login-consents small { display: block; margin: 5px 0 0 27px; color: var(--muted); font-size: 10px; }
 .auth-status { min-height: 24px; margin: 14px 0 0 !important; color: var(--accent-dark) !important; overflow-wrap: anywhere; }
 .development-link { display: inline-flex; min-height: 44px; margin-top: 8px; align-items: center; color: var(--navy); font-size: 12px; font-weight: 800; }
 .account-label { display: block; color: var(--muted); font-size: 10px; font-weight: 850; letter-spacing: .08em; }
 #account-email { display: block; margin: 7px 0 20px; color: var(--navy); font-size: 20px; overflow-wrap: anywhere; }
-.logout-option { min-height: 44px; margin: 18px 0; display: flex; gap: 9px; align-items: center; color: var(--muted); font-size: 12px; }
-.logout-option input { width: 18px; height: 18px; }
+.account-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.delete-account { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+.delete-account strong { color: var(--navy); font-size: 13px; }
+.delete-account p { margin: 7px 0 13px !important; font-size: 12px; }
+.button-danger { border-color: #a63d3d; color: #8b2929; }
+.button-danger:hover, .button-danger:focus-visible { border-color: #8b2929; background: #fff1f1; }
 .result-score { margin: 25px 30px 15px; padding: 18px; display: flex; gap: 16px; align-items: center; background: var(--navy); color: white; border-radius: 8px; }
 .result-score > span { color: #f1c985; font-family: Georgia, serif; font-size: 31px; }
 .result-score p { margin: 0; color: #a9bac8; font-size: 10px; }

@@ -6,8 +6,8 @@ import os
 import sys
 from pathlib import Path
 
-from .auth import environment
-from .config import configuration_report, require_production_settings
+from .auth import cleanup_personal_data, environment
+from .config import configuration_report, draft_retention_days, require_production_settings
 from .db import connect, initialize, list_sources, public_stats
 from .ingest import (
     ConfigurationError,
@@ -30,7 +30,7 @@ def parser() -> argparse.ArgumentParser:
     root.add_argument("--db", type=Path, help="SQLite 전용 경로(운영 DATABASE_URL보다 우선)")
     commands = root.add_subparsers(dest="command", required=True)
 
-    commands.add_parser("init", help="데이터베이스 초기화")
+    commands.add_parser("init", help="관리자 권한으로 데이터베이스 스키마 초기화·마이그레이션")
     commands.add_parser("status", help="수집 현황 확인")
     doctor_parser = commands.add_parser("doctor", help="비밀값을 노출하지 않고 운영 설정 점검")
     doctor_parser.add_argument("--production", action="store_true", help="운영 필수 설정 기준으로 점검")
@@ -58,6 +58,14 @@ def parser() -> argparse.ArgumentParser:
         help="문서 처리·객체 정리 실패 또는 격리 발생 시 종료 코드 4 반환",
     )
 
+    cleanup_parser = commands.add_parser(
+        "cleanup-personal-data",
+        help="보존 기간이 지난 개인 데이터 정리(기본값은 삭제하지 않는 점검)",
+    )
+    cleanup_parser.add_argument(
+        "--execute", action="store_true", help="점검 결과를 실제로 삭제",
+    )
+
     rights_info_parser = commands.add_parser(
         "rights-info", help="권리 판정 전 현재 첨부 식별정보와 검토 토큰 확인"
     )
@@ -81,7 +89,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         if args.command == "init":
-            target = initialize(args.db)
+            # This is the sole command-line schema administration path.  Normal
+            # web, collector, and cleanup startup honors JOBNKILL_AUTO_MIGRATE.
+            target = initialize(args.db, force_migrate=True)
             backend = "postgresql" if isinstance(target, str) and target.startswith(("postgresql://", "postgres://")) else "sqlite"
             _print({"database_backend": backend, "status": "initialized"})
         elif args.command == "serve":
@@ -125,6 +135,12 @@ def main(argv: list[str] | None = None) -> int:
                 or result.get("gc_pending", 0) or result.get("quarantined", 0)
             ):
                 return 4
+        elif args.command == "cleanup-personal-data":
+            target = initialize(args.db)
+            with connect(target) as connection:
+                _print(cleanup_personal_data(
+                    connection, draft_retention_days(), execute=args.execute,
+                ))
         elif args.command == "rights-info":
             _print(get_attachment_rights_review(args.attachment_id, args.db))
         elif args.command == "rights":

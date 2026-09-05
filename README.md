@@ -13,15 +13,15 @@
 - 필드별 원문 URL·PDF 페이지·발췌 근거 저장
 - 문서별 권리 상태 및 판정 이력. 승인 전 원문 다운로드 자동 차단
 - 기관/직무/NCS 검색 API
-- 8단계 모바일 우선 작성 화면과 브라우저 자동 저장
+- 8단계 모바일 우선 작성 화면과 세션 전용 브라우저 자동 저장(명시적 선택 시 30일 보관)
 - 이메일 매직링크 로그인, CSRF 보호, 계정 초안 버전·충돌 관리
 - SQLite 개발 모드와 PostgreSQL 운영 모드
 - 로컬 개발 저장소와 암호화된 AWS S3 문서 저장소
 - 업로드 의도·삭제 재시도·저장 위치 고정을 기록하는 영속 객체 정리 큐
-- 수동 최초 전체 수집과 매일 갱신을 분리한 GitHub Actions
+- Render Cron의 수동 최초 전체 수집과 매일 갱신
 - 개조식·스토리텔링 출력, 누락 사실의 `[확인 필요]` 표시
 - 블라인드 채용 민감정보 및 팀 성과 과장 경고
-- Ponytail v4.9.0 저장소 기본 플러그인 설정
+- Ponytail v4.9.0 검증 커밋 고정 저장소 기본 플러그인 설정
 
 ### 수집 범위 현황
 
@@ -52,23 +52,38 @@ python -m jobandkill serve
 python -m unittest discover -s tests -v
 ```
 
-## Render 파일럿 배포
+## Render 운영 구성 — 고객 배포 보류
 
-저장소의 `render.yaml`은 싱가포르 리전에 무료 웹 서비스와 무료 PostgreSQL을 함께 만들고, 내부 DB 주소·Render 공개 HTTPS 주소·플랫폼 생성 인증 제한 키를 자동 연결합니다.
+`render.yaml`은 싱가포르 리전의 유료 Web과 두 Cron을 정의합니다. PostgreSQL `0.5c-1g`·5GB는 최소권한 역할을 먼저 만들 수 있도록 Dashboard에서 이름 `jobandkill-db`, 데이터베이스 이름과 소유자 사용자명 `jobandkill`로 별도 선생성합니다. 공공문서 수집과 개인정보 파기는 서로 다른 Cron 서비스이며 각각 매일 `18:35 UTC`, `18:20 UTC`에 실행됩니다. GitHub Actions가 외부 운영 DB에 직접 연결하는 방식은 사용하지 않습니다.
+
+이는 **실제 고객 배포가 가능하다는 뜻이 아닙니다.** 현재 고객 대상 공개·운영은 데이터 레지던시, 유료 자원 비용 승인, 개인정보 처리 및 국외 이전 결정을 문서화해 승인하기 전까지 보류합니다. 현재 동작 중인 공개 URL은 이 문서에서 주장하지 않습니다.
 
 [Render에서 Job&Kill Blueprint 열기](https://render.com/deploy?repo=https://github.com/jonandkill/Jobandkill/tree/jobandkill1)
 
-Dashboard가 요청하면 `jobandkill1` 브랜치를 선택하고 로그인 메일 값만 Render의 비밀 환경변수 입력란에 넣습니다. 값은 채팅이나 GitHub 커밋에 넣지 않습니다.
+비밀값은 저장소·채팅·GitHub Actions가 아니라 각 공급자의 Dashboard에만 입력합니다. Blueprint 화면에서 `jobandkill1` 브랜치를 선택한 후, 웹 서비스에는 아래 운영 값을 입력합니다. URL·버전·보존기간은 비밀값은 아니지만 실제 공개 정책과 정확히 일치해야 하므로 저장소에 임의의 기본값을 넣지 않습니다.
 
-- 로그인 메일: `JOBNKILL_SMTP_HOST`, `JOBNKILL_SMTP_PORT`, `JOBNKILL_SMTP_USERNAME`, `JOBNKILL_SMTP_PASSWORD`, `JOBNKILL_SMTP_FROM`
+- `JOBNKILL_RESEND_API_KEY`
+- `JOBNKILL_RESEND_FROM` (Resend에서 검증한 발신 주소)
+- `JOBNKILL_PUBLIC_URL` (고객이 실제 접속하는 정확한 HTTPS origin)
+- `JOBNKILL_PRIVACY_POLICY_URL` (공개 HTTPS 개인정보 처리방침)
+- `JOBNKILL_PRIVACY_POLICY_VERSION` (사용자가 확인하는 현재 방침 버전)
+- `JOBNKILL_PRIVACY_POLICY_SHA256` (게시한 방침 본문의 SHA-256)
+- `JOBNKILL_OVERSEAS_TRANSFER_POLICY_URL` (싱가포르 Blueprint용 공개 HTTPS 국외 이전 안내)
+- `JOBNKILL_OVERSEAS_TRANSFER_VERSION` (현재 국외 이전 안내 버전)
+- `JOBNKILL_OVERSEAS_TRANSFER_SHA256` (게시한 국외 이전 안내 본문의 SHA-256)
+- `JOBNKILL_DRAFT_RETENTION_DAYS` (마지막 수정 후 서버 초안을 자동 파기할 일수)
 
-S3는 공개 웹이 아니라 수집·문서 처리 작업만 사용합니다. `JOBNKILL_S3_BUCKET`, `JOBNKILL_S3_ACCESS_KEY_ID`, `JOBNKILL_S3_SECRET_ACCESS_KEY`는 공식 API 키와 함께 GitHub의 보호된 `production` Environment에 저장하고 Render 웹 서비스에는 AWS 키를 주입하지 않습니다.
+현재 싱가포르 Blueprint는 `JOBNKILL_OVERSEAS_TRANSFER_REQUIRED=1`로 고정되어 개인정보 처리방침 동의와 국외 이전 동의를 별도로 요구합니다. 위 안내 URL·버전 또는 보존기간이 비어 있으면 운영 웹은 시작되지 않습니다. 실제 수탁자 법인명·이전 국가·항목·목적·기간·거부 방법이 확인된 정책을 먼저 게시해야 하며, 예시 문구로 우회하지 않습니다.
+
+Blueprint의 기본 로그인 메일 전송 방식은 Resend HTTPS API입니다. 앱은 `JOBNKILL_MAIL_TRANSPORT=smtp`와 암호화 SMTP 설정을 지정하면 SMTP도 대체 방식으로 지원하지만, 운영 Blueprint의 기본값은 SMTP가 아닙니다.
+
+S3와 공식 API는 수집·문서 처리 Cron에만 필요합니다. 웹 서비스에는 수집기·S3·AWS 자격증명을 넣지 않습니다. 수집 Cron의 Render Dashboard에는 `JOBNKILL_ALIO_API_URL_TEMPLATE`, `JOBNKILL_ALIO_SERVICE_KEY`, `JOBNKILL_S3_BUCKET`, 선택적 `JOBNKILL_S3_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`만 해당 공급자에서 발급한 값으로 설정합니다.
+
+세 실행 서비스는 동일한 DB 소유자 계정을 공유하지 않습니다. Web은 `jobandkill_web`, 수집 Cron은 `jobandkill_collector`, 개인정보 파기 Cron은 `jobandkill_cleanup` 전용 사설 URL을 각각 `JOBNKILL_WEB_DATABASE_URL`, `JOBNKILL_COLLECTOR_DATABASE_URL`, `JOBNKILL_CLEANUP_DATABASE_URL`에 입력합니다. 각 URL은 `sslmode=require`를 적용하고 모든 서비스는 `JOBNKILL_AUTO_MIGRATE=0`으로 시작합니다. 수집 역할은 회원·동의·로그인·세션·초안에 접근할 수 없고, 파기 역할은 이메일·초안 본문을 읽을 수 없습니다. 소유자 URL은 일회성 `init`과 `scripts/provision_database_roles.sql` 실행에만 사용하며 런타임 서비스에는 저장하지 않습니다. 역할 비밀번호는 ACL SQL이나 환경변수 인수로 전달하지 않고 신뢰하는 관리자 터미널의 psql `\password`로만 설정합니다.
 
 현재 객체 저장 구현은 버킷 버전 관리 조회와 서버 측 암호화를 요구하므로, 먼저 비공개 AWS S3 버킷을 사용합니다. 버전 관리를 한 번도 켜지 않은 전용 버킷과 `GetBucketVersioning`, 암호화된 `PutObject`, `DeleteObject` 최소 권한이 필요합니다. Cloudflare R2처럼 이 API 계약이 다른 저장소는 별도 어댑터 없이는 지원하지 않습니다.
 
-Render 무료 웹 서비스는 SMTP 25/465/587 포트를 차단합니다. 메일 공급자가 STARTTLS 대체 포트(예: 2525)를 지원할 때 그 포트를 입력해야 하며, 지원하지 않으면 유료 웹 서비스 또는 HTTPS 메일 API 어댑터가 필요합니다.
-
-무료 구성은 공개 URL과 기능을 확인하는 파일럿용입니다. 무료 PostgreSQL은 30일 후 만료되고 관리형 백업이 없으므로 실제 운영 데이터 적재 전 유료 DB·백업·외부 접근 제한 방식을 확정해야 합니다. 전체 운영 연결 순서는 `docs/operations.md`에 있습니다.
+배포·점검 순서와 고객 배포 전 결정 항목은 `docs/operations.md`에 있습니다.
 
 ## 공식 채용정보 수집 연결
 
@@ -93,7 +108,7 @@ python -m jobandkill import official-response.json --source data-go-kr-alio
 
 가져오기 파일은 기준시점을 검증할 수 없으므로 기존 첨부문서의 권리 상태를 바꾸지 않습니다. 새 첨부도 자동 승인하지 않고 `review_required`로 등록합니다.
 
-최초 전체 수집은 `--full`로 최대 1,000페이지까지 확인합니다. API의 `totalCount`에 도달하지 못하거나, 첨부 항목이 비정상 형식이거나, 권리 정리 대기열이 남으면 `partial`을 반환하고 명령도 성공으로 간주하지 않습니다. 비정상 첨부 응답은 기존 파일이 제거됐다는 근거로 사용하지 않으므로 이미 확인된 권리를 오인 철회하지 않습니다. 이후 갱신은 같은 레코드를 다시 받아도 중복되지 않는 방식으로 동작합니다. `.github/workflows/sync.yml`은 수동 전체 수집과 한국시간 03:35 일일 갱신을 분리하며, 사용자 웹 요청에서는 수집기를 호출하지 않습니다.
+최초 전체 수집은 `--full`로 최대 1,000페이지까지 확인합니다. API의 `totalCount`에 도달하지 못하거나, 첨부 항목이 비정상 형식이거나, 권리 정리 대기열이 남으면 `partial`을 반환하고 명령도 성공으로 간주하지 않습니다. 비정상 첨부 응답은 기존 파일이 제거됐다는 근거로 사용하지 않으므로 이미 확인된 권리를 오인 철회하지 않습니다. 이후 갱신은 같은 레코드를 다시 받아도 중복되지 않는 방식으로 동작합니다. Render Cron은 매일 18:35 UTC에 갱신하고, 사용자 웹 요청에서는 수집기를 호출하지 않습니다.
 
 ## 첨부 PDF 권리 게이트
 
@@ -143,17 +158,22 @@ flowchart TD
 
 ## 운영 전 필수 작업
 
+- 실제 고객 배포 보류를 해제할 데이터 레지던시·유료 서비스 비용·개인정보 처리 결정과 책임자 승인
+- 대한민국 개인정보 국외 이전 적용 여부·고지/동의 또는 다른 적법 근거, 이전 국가·수탁자·이전 항목·보유기간·보호조치 확인
+- Render·Resend·AWS 등 처리자와의 DPA, 운영자/수탁자 역할, 접근 권한·사고 대응·보관/파기 책임의 계약·정책 확인
 - 공공데이터포털 운영계정 활용신청 및 트래픽 승인
 - NCS·기관별 첨부문서 이용범위 법무 검토와 필요한 별도 허가
 - PostgreSQL 백업·복구 검증과 S3 비공개/암호화 정책 적용. 전용 원문 버킷은 버전 관리 비활성화
-- 배포 플랫폼의 TLS, 프록시 요청 제한, SMTP 연결
+- Render와 같은 비슈퍼유저 소유자 조건에서 역할 ACL 스크립트와 세 역할의 실제 접근 거부 통합검사
+- 배포 플랫폼의 TLS, 프록시 요청 제한, Resend HTTPS 로그인 메일 연결
+- 공개 로그인 CAPTCHA/WAF, Resend 일일 비용 한도와 이상발송 경보
 - 바이너리 HWP 변환기 및 스캔 PDF용 한국어 OCR 작업 큐
 - 운영 배포 후 320/390/768/1440px 시각 QA
 
-운영 값은 채팅이나 저장소에 넣지 않습니다. `requirements-production.txt`를 설치하고 `JOBNKILL_DATABASE_URL`, S3, SMTP, 공개 HTTPS 주소를 배포 플랫폼의 Secret Manager 또는 GitHub Environment에 설정한 뒤 아래 점검을 통과시켜야 합니다. Render에서는 공개 주소와 내부 DB 주소가 Blueprint로 자동 연결됩니다. 전체 절차는 `docs/operations.md`에 있습니다.
+운영 값은 채팅이나 저장소에 넣지 않습니다. 값은 해당 공급자 Dashboard의 비밀 환경변수에만 설정합니다. 수집기 설정은 Cron 실행 환경에서 아래 점검을 통과시켜야 합니다. Blueprint는 DB 소유자 URL을 자동 연결하지 않으며, 세 최소권한 역할 URL이 없으면 안전하게 시작 실패합니다. 최초 DB 초기화·역할 분리 절차는 `docs/operations.md`에 있습니다.
 
 ```bash
-python -m jobandkill doctor --production --require-api
+scripts/run_with_database_role.sh python -m jobandkill doctor --production --collector-only --require-api
 ```
 
 ## 주요 명령
@@ -163,5 +183,10 @@ python -m jobandkill status
 python -m jobandkill sync --all
 python -m jobandkill sync --source data-go-kr-alio --full
 python -m jobandkill process-documents --limit 20
+python -m jobandkill cleanup-personal-data
 python -m jobandkill serve --host 127.0.0.1 --port 8787
 ```
+
+`cleanup-personal-data`는 기본적으로 삭제 예정 건수만 확인합니다. 실제 삭제는 운영 Cron과 동일하게 `--execute`를 명시해야 하며, 서버 초안은 `JOBNKILL_DRAFT_RETENTION_DAYS`에 정한 마지막 수정 기준 기간이 지난 뒤 삭제됩니다.
+
+위 주요 명령은 로컬 개발 기본형입니다. Render 운영 Shell에서 실행할 때는 해당 서비스 역할별 URL만 노출되므로 모든 런타임 명령 앞에 `scripts/run_with_database_role.sh`를 붙입니다. 수집·권리·문서 명령은 collector 서비스에서, 개인정보 파기 명령은 cleanup 서비스에서만 실행합니다. 관리자 `init`은 이 래퍼를 사용하지 않고 별도 일회성 소유자 연결 절차로만 실행합니다.
