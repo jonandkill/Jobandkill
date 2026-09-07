@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 from .auth import cleanup_personal_data, environment
+from .catalog import import_ncs_catalog, import_ncs_training_csv, sync_ncs_catalog
+from .data_sources import data_coverage
 from .config import configuration_report, draft_retention_days, require_production_settings
 from .db import connect, initialize, list_sources, public_stats
 from .ingest import (
@@ -32,6 +34,13 @@ def parser() -> argparse.ArgumentParser:
 
     commands.add_parser("init", help="관리자 권한으로 데이터베이스 스키마 초기화·마이그레이션")
     commands.add_parser("status", help="수집 현황 확인")
+    commands.add_parser("coverage", help="정보원별 수집·미제공·권한 제한 현황 점검")
+    catalog_sync = commands.add_parser("catalog-sync", help="NCS 능력단위를 DB에 사전 수집(중단 지점부터 재개)")
+    catalog_sync.add_argument("--max-pages", type=int, default=100, help="이번 실행의 페이지 예산; 남으면 일부 수집으로 보고")
+    catalog_sync.add_argument("--restart", action="store_true", help="새 전체 수집 주기를 첫 페이지부터 시작")
+    catalog_import = commands.add_parser("catalog-import", help="NCS 공식 API 응답 또는 훈련기준 CSV 적재")
+    catalog_import.add_argument("path", type=Path)
+    catalog_import.add_argument("--format", choices=("api", "training-csv"), default="api")
     doctor_parser = commands.add_parser("doctor", help="비밀값을 노출하지 않고 운영 설정 점검")
     doctor_parser.add_argument("--production", action="store_true", help="운영 필수 설정 기준으로 점검")
     doctor_parser.add_argument("--require-api", action="store_true", help="공식 API 수집 설정도 필수로 점검")
@@ -106,6 +115,19 @@ def main(argv: list[str] | None = None) -> int:
             target = initialize(args.db)
             with connect(target) as connection:
                 _print({"stats": public_stats(connection), "sources": list_sources(connection)})
+        elif args.command == "coverage":
+            target = initialize(args.db)
+            with connect(target) as connection:
+                _print(data_coverage(connection))
+        elif args.command == "catalog-sync":
+            result = sync_ncs_catalog(args.db, max_pages=args.max_pages, restart=args.restart)
+            _print(result)
+            return 0 if result.get("status") == "completed" else 3
+        elif args.command == "catalog-import":
+            importer = import_ncs_training_csv if args.format == "training-csv" else import_ncs_catalog
+            result = importer(args.path, args.db)
+            _print(result)
+            return 0 if result.get("status") == "imported" else 3
         elif args.command == "sync":
             if args.full and "JOBNKILL_MAX_PAGES" not in os.environ:
                 os.environ["JOBNKILL_MAX_PAGES"] = "1000"

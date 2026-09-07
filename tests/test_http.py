@@ -59,6 +59,27 @@ class HttpTests(unittest.TestCase):
             urllib.request.urlopen(f"{self.base_url}/api/jobs?offset=1001")
         self.assertEqual(raised.exception.code, 400)
 
+    def test_catalog_empty_and_coverage_are_honest(self) -> None:
+        with urllib.request.urlopen(f"{self.base_url}/api/catalog") as response:
+            data = json.load(response)
+            self.assertEqual(data["items"], [])
+        with urllib.request.urlopen(f"{self.base_url}/api/data-coverage") as response:
+            data = json.load(response)
+            self.assertFalse(data["all_government_data_complete"])
+            self.assertGreater(len(data["sources"]), 5)
+
+    def test_catalog_offset_and_unknown_id(self) -> None:
+        with urllib.request.urlopen(f"{self.base_url}/api/catalog?offset=13400") as response:
+            self.assertEqual(json.load(response)["items"], [])
+        for path, code in (("/api/catalog?offset=2000001", 400),
+                           ("/api/catalog?limit=x", 400),
+                           ("/api/catalog?limit=0", 400),
+                           ("/api/catalog?q=" + "x" * 201, 400),
+                           ("/api/catalog/" + "a" * 64, 404)):
+            with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(self.base_url + path)
+            self.assertEqual(raised.exception.code, code)
+
     def test_compose_endpoint(self) -> None:
         payload = {
             "document_type": "career",

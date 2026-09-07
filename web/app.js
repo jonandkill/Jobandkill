@@ -11,6 +11,7 @@ const ACCOUNT_DELETE_CONFIRMATION = "DELETE MY ACCOUNT";
 const RESIDENT_ID_PATTERN = /(?<!\p{Decimal_Number})\p{Decimal_Number}{6}\s*-?\s*[1-8]\p{Decimal_Number}{6}(?!\p{Decimal_Number})/u;
 const FIELDS = [
   "document_type", "style", "target_length", "institution", "target_job", "ncs_path",
+  "reference_catalog_id", "reference_source_url", "reference_name", "reference_version",
   "matched_duty", "matched_skill", "experience_title", "organization", "period_start",
   "period_end", "role", "situation", "objective", "judgment", "actions", "tools",
   "collaboration", "result", "evidence", "contribution", "learning", "facts_confirmed"
@@ -18,6 +19,7 @@ const FIELDS = [
 const defaults = {
   document_type: "career", style: "bullet", target_length: 800, institution: "", target_job: "",
   ncs_path: "", matched_duty: "", matched_skill: "", experience_title: "", organization: "",
+  reference_catalog_id: "", reference_source_url: "", reference_name: "", reference_version: "",
   period_start: "", period_end: "", role: "", situation: "", objective: "", judgment: "",
   actions: [""], tools: [], collaboration: "", result: "", evidence: "", contribution: "",
   learning: "", facts_confirmed: false
@@ -135,7 +137,9 @@ function loadBrowserDraft() {
 }
 
 function draftContainsResidentId(draft = state) {
-  return RESIDENT_ID_PATTERN.test(JSON.stringify(draft).normalize("NFKC"));
+  // A validated SHA-256 catalogue ID can coincidentally contain 13 digits.
+  const serialized = JSON.stringify(draft, (key, value) => key === "reference_catalog_id" && typeof value === "string" && value.length === 64 && /^[a-f0-9]{64}$/u.test(value) ? "" : value);
+  return RESIDENT_ID_PATTERN.test(serialized.normalize("NFKC"));
 }
 
 function saveBrowserDraft() {
@@ -875,6 +879,11 @@ function updateSelectedJob() {
     tag.textContent = value.length > 35 ? `${value.slice(0, 35)}…` : value;
     tags.append(tag);
   });
+  if (state.reference_catalog_id) {
+    const reference = document.createElement("span");
+    reference.textContent = "NCS 공통 기준 참고 · 기관별 채용요건 아님";
+    tags.append(reference);
+  }
 }
 
 async function loadHealth() {
@@ -898,14 +907,272 @@ async function loadHealth() {
   }
 }
 
+let archiveScope = "catalog";
+let archiveRequest = 0;
+let catalogDetailRequest = 0;
+let catalogOffset = 0;
+let catalogQuery = "";
+const CATALOG_PAGE_SIZE = 20;
+
+function clearCatalogDetail() {
+  catalogDetailRequest += 1;
+  $("#catalog-detail").hidden = true;
+  $("#catalog-detail").replaceChildren();
+}
+
 async function openJobDialog() {
   const dialog = $("#job-dialog");
   dialog.showModal();
   $("#job-search").focus();
-  await searchJobs("");
+  loadCatalogCoverage();
+  await searchArchive($("#job-search").value);
+}
+
+function setArchiveScope(value) {
+  archiveScope = value === "jobs" ? "jobs" : "catalog";
+  const catalog = archiveScope === "catalog";
+  $("#archive-scope-note").textContent = catalog
+    ? "NCS는 직무 수행에 필요한 공통 기준이며, 특정 공공기관의 채용공고가 아닙니다."
+    : "기관별 채용공고와 첨부 직무기술서에서 수집한 직무입니다. NCS 공통 기준과는 구분됩니다.";
+  $("#catalog-coverage").hidden = !catalog;
+  $("#job-search-label").textContent = catalog ? "직무명이나 NCS 분류명을 입력하세요." : "기관명이나 직무명을 입력하세요.";
+  $("#job-search").placeholder = catalog ? "예: 사무행정, 전기, 능력단위" : "예: 사무행정, 한국산림복지진흥원";
+  searchArchive($("#job-search").value);
+}
+
+function searchArchive(query, offset = 0) {
+  clearCatalogDetail();
+  $("#catalog-pagination").hidden = true;
+  return archiveScope === "catalog" ? searchCatalog(query, offset) : searchJobs(query);
+}
+
+async function loadCatalogCoverage() {
+  const label = $("#catalog-coverage-message");
+  try {
+    const data = await api("/api/data-coverage");
+    const catalog = data.catalog || {};
+    const total = Number(catalog.catalog_records);
+    if (!Number.isFinite(total)) throw new Error();
+    const notes = Array.isArray(catalog.notes) ? catalog.notes.filter(note => typeof note === "string").slice(0, 3) : [];
+    label.textContent = [
+      `이 서비스에 저장된 직무능력 자료 ${total.toLocaleString("ko-KR")}건 · 정부 전체 자료의 총수가 아닙니다.`,
+      total === 0 ? "아직 수집된 자료가 없습니다. API 인증·이용권한·최초 수집 여부를 확인해야 합니다." : "필요 지식·기술·태도 등의 제공 범위는 자료별로 다릅니다.",
+      ...notes
+    ].join("\n");
+    renderSourceCoverage(data.sources, catalog.sources);
+  } catch {
+    label.textContent = "수집 상태를 확인하지 못했습니다. 정부에 자료가 없다는 의미는 아닙니다. 창을 다시 열면 재확인합니다.";
+    $("#catalog-source-state").hidden = true;
+  }
+}
+
+function renderSourceCoverage(sources, catalogSources = []) {
+  const list = $("#catalog-source-list");
+  list.replaceChildren();
+  const statusNames = {
+    adapter_ready: "수집기 준비 · 인증 및 실제 수집 확인 필요",
+    spec_verified: "명세 확인 · 수집기 연결 전", manual_import_ready: "파일 가져오기 준비",
+    not_connected: "아직 연결되지 않음", metadata_adapter_only: "메타데이터 연결만 준비"
+  };
+  const fieldNames = {
+    definition: "직무·능력단위 설명", performance_criteria: "수행준거", knowledge: "지식", skills: "기술", attitudes: "태도",
+    institution_specific_requirements: "기관별 채용 요건", structured_knowledge: "구조화된 지식",
+    structured_skills: "구조화된 기술", structured_attitudes: "구조화된 태도"
+  };
+  for (const source of Array.isArray(sources) ? sources : []) {
+    const row = document.createElement("article");
+    const title = document.createElement("strong");
+    title.textContent = source.name || "정보원 이름 미확인";
+    const status = document.createElement("p");
+    status.textContent = source.rights === "restricted" ? "이용권한 제한 · 상용 수집 제외"
+      : source.rights === "review_required" || source.rights === "document_review_required" ? "이용권한 검토 대기"
+      : statusNames[source.implementation] || "연결 상태 확인 필요";
+    const note = document.createElement("p");
+    note.textContent = source.note || "제공 범위 확인 필요";
+    row.append(title, status, note);
+    const stored = (Array.isArray(catalogSources) ? catalogSources : []).find(item => item.source_slug === source.slug);
+    if (stored) {
+      const count = document.createElement("p");
+      const runNames = { completed: "해당 수집 범위 완료", imported: "공개 파일 가져오기 완료", partial: "일부만 수집", failed: "최근 수집 실패", running: "수집 진행 중" };
+      const runStatus = stored.latest_run ? runNames[stored.latest_run.status] || "최근 수집 상태 확인 필요" : "아직 수집 실행 이력 없음";
+      count.textContent = `현재 저장 ${Number(stored.records || 0).toLocaleString("ko-KR")}건 · ${runStatus}`;
+      row.append(count);
+    }
+    if (Array.isArray(source.not_provided) && source.not_provided.length) {
+      const missing = document.createElement("p");
+      missing.textContent = `이 정보원에서 제공하지 않는 항목: ${source.not_provided.map(key => fieldNames[key] || "추가 항목").join(" · ")}`;
+      row.append(missing);
+    }
+    const href = safeSourceLink(source.url);
+    if (href) {
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "공식 제공 범위 확인 ↗";
+      row.append(link);
+    }
+    list.append(row);
+  }
+  $("#catalog-source-state").hidden = !list.children.length;
+}
+
+async function searchCatalog(query, offset = 0) {
+  const request = ++archiveRequest;
+  const stateLabel = $("#job-search-state");
+  const results = $("#job-results");
+  catalogQuery = String(query || "").trim();
+  catalogOffset = Math.max(0, offset);
+  results.replaceChildren();
+  stateLabel.textContent = "저장된 NCS 직무능력 자료를 검색하고 있습니다…";
+  try {
+    const data = await api(`/api/catalog?q=${encodeURIComponent(catalogQuery)}&limit=${CATALOG_PAGE_SIZE}&offset=${catalogOffset}`);
+    if (request !== archiveRequest) return;
+    if (!Array.isArray(data.items)) throw new Error();
+    if (!data.items.length) {
+      stateLabel.textContent = catalogQuery
+        ? "저장된 자료에서 일치하는 항목을 찾지 못했습니다. 다른 단어로 검색하거나 수집 상태를 확인해 주세요."
+        : "아직 수집된 NCS 직무능력 자료가 없습니다. 인증·권리 확인 및 최초 수집 후 표시됩니다.";
+    } else {
+      stateLabel.textContent = `${catalogOffset + 1}–${catalogOffset + data.items.length}번째 참고 자료입니다. 선택하면 출처와 제공 항목을 확인할 수 있습니다.`;
+      data.items.forEach(item => results.append(createCatalogResult(item)));
+    }
+    const total = Number(data.total);
+    const hasNext = Number.isFinite(total) ? catalogOffset + data.items.length < total : data.items.length === CATALOG_PAGE_SIZE;
+    $("#catalog-pagination").hidden = catalogOffset === 0 && !hasNext;
+    $("#catalog-previous").disabled = catalogOffset === 0;
+    $("#catalog-next").disabled = !hasNext;
+    $("#catalog-page").textContent = `${Math.floor(catalogOffset / CATALOG_PAGE_SIZE) + 1}쪽`;
+  } catch {
+    if (request !== archiveRequest) return;
+    stateLabel.textContent = "직무능력 자료를 불러오지 못했습니다. 다시 검색하거나 직접 입력으로 계속할 수 있습니다.";
+  }
+}
+
+function createCatalogResult(item) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "job-result";
+  const body = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = item.job_title || "이름 미제공";
+  const classification = document.createElement("small");
+  classification.textContent = item.ncs_path || "분류 정보 미제공";
+  const note = document.createElement("small");
+  note.textContent = "NCS 공통 직무능력 · 기관 채용공고 아님";
+  const arrow = document.createElement("span");
+  arrow.textContent = "→";
+  body.append(title, classification, note);
+  button.append(body, arrow);
+  button.addEventListener("click", () => showCatalogDetail(item.id));
+  return button;
+}
+
+function catalogDraftAdditions(item, draft) {
+  const candidates = { target_job: item.job_title, ncs_path: item.ncs_path, matched_duty: item.summary };
+  const limits = { target_job: 300, ncs_path: 1000, matched_duty: 1000 };
+  const additions = {};
+  for (const [field, value] of Object.entries(candidates)) {
+    if (!String(draft[field] || "").trim() && typeof value === "string" && value.trim() && [...value.trim()].length <= limits[field]) additions[field] = value.trim();
+  }
+  return additions;
+}
+
+function applyCatalogReference(item) {
+  const additions = catalogDraftAdditions(item, state);
+  const hasReference = ["reference_catalog_id", "reference_source_url", "reference_name", "reference_version"].some(field => state[field]);
+  if (hasReference && state.reference_catalog_id !== item.id) {
+    $("#catalog-apply-status").textContent = "이미 다른 NCS 자료를 참고한 초안입니다. 기존 참고 출처와 작성 내용을 유지했습니다. 여러 출처를 섞지 않도록 새 초안에서 적용해 주세요.";
+    return;
+  }
+  const reference = JobAndKillComposer.catalogReference(item);
+  if (Object.keys(additions).length && !reference) {
+    $("#catalog-apply-status").textContent = "공식 출처 기록을 확인하지 못해 적용하지 않았습니다. 기존 작성 내용은 그대로 유지됩니다.";
+    return;
+  }
+  Object.assign(state, additions);
+  if (Object.keys(additions).length) {
+    Object.assign(state, reference);
+    saveState();
+  }
+  updateSelectedJob();
+  closeDialog("job-dialog");
+  if ($("#workspace").hidden) showWorkspace();
+  else renderStep();
+  $("#form-message").textContent = Object.keys(additions).length
+    ? "NCS 참고 자료를 비어 있던 목표 직무·분류·업무 항목에만 적용했습니다. 지원 기관과 작성한 경험은 변경하지 않았습니다."
+    : "기존 입력은 유지했습니다. 자동 적용할 수 있는 빈 항목이 없어, 필요한 부분을 직접 입력해 주세요.";
+}
+
+function safeSourceLink(value) {
+  try {
+    const url = new URL(value);
+    return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+async function showCatalogDetail(id) {
+  const request = ++catalogDetailRequest;
+  const panel = $("#catalog-detail");
+  panel.hidden = false;
+  panel.textContent = "직무능력의 제공 항목과 출처를 확인하고 있습니다…";
+  panel.focus();
+  try {
+    const data = await api(`/api/catalog/${encodeURIComponent(String(id))}`);
+    if (request !== catalogDetailRequest) return;
+    const item = data.item;
+    if (!item || typeof item !== "object") throw new Error();
+    panel.replaceChildren();
+    const title = document.createElement("h3");
+    title.textContent = item.job_title || "이름 미제공";
+    const context = document.createElement("p");
+    context.textContent = `${item.ncs_path || "분류 정보 미제공"}\nNCS 공통 기준 · 특정 기관의 채용 조건이 아닙니다.`;
+    const fields = document.createElement("dl");
+    for (const [key, label] of [
+      ["summary", "직무·능력단위 설명"], ["knowledge", "필요 지식"], ["skills", "필요 기술"],
+      ["attitudes", "필요 태도"], ["performance_criteria", "수행준거"]
+    ]) {
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const description = document.createElement("dd");
+      const value = Array.isArray(item[key]) ? item[key].filter(part => typeof part === "string").join("\n") : item[key];
+      description.textContent = typeof value === "string" && value.trim() ? value : "이 자료에서 미제공 또는 미수집 · 원문 확인 필요";
+      fields.append(term, description);
+    }
+    const provenance = document.createElement("p");
+    const sourceName = { "ncs-common": "NCS 능력단위 공통정보", "ncs-training-2025": "NCS 훈련기준 파일" }[item.source_slug] || "NCS 참고 자료";
+    provenance.textContent = `자료 구분: ${sourceName} · 수집 시각: ${item.collected_at || "미확인"} · 원자료 기준일: ${item.source_updated_at || "미확인"}`;
+    const notice = document.createElement("p");
+    notice.textContent = "미제공·미수집 항목을 AI로 채워 공식 정보처럼 표시하지 않습니다. 적용하면 비어 있는 목표 직무·NCS 분류·관련 업무만 채웁니다. 기존 입력, 지원 기관과 경험은 그대로 유지합니다. 글자 수 제한을 넘는 원문은 자동 적용하지 않습니다. 적용한 자료의 제공기관·출처·기준 버전은 초안과 복사 내용에도 함께 보관합니다.";
+    panel.append(title, context, fields, provenance);
+    const href = safeSourceLink(item.source_url);
+    if (href) {
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "정부 원문·데이터 출처 확인 ↗";
+      panel.append(link);
+    }
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "button button-dark";
+    apply.textContent = "비어 있는 항목에 참고 자료 적용";
+    apply.addEventListener("click", () => applyCatalogReference(item));
+    const applyStatus = document.createElement("p");
+    applyStatus.id = "catalog-apply-status";
+    applyStatus.role = "status";
+    panel.append(notice, apply, applyStatus);
+  } catch {
+    if (request !== catalogDetailRequest) return;
+    panel.textContent = "상세 정보를 불러오지 못했습니다. 작성한 내용은 변경되지 않았습니다. 자료를 다시 선택해 주세요.";
+  }
 }
 
 async function searchJobs(query) {
+  const request = ++archiveRequest;
   const stateLabel = $("#job-search-state");
   const results = $("#job-results");
   results.replaceChildren();
@@ -914,6 +1181,7 @@ async function searchJobs(query) {
     const response = await fetch(`/api/jobs?q=${encodeURIComponent(query)}&limit=30`);
     if (!response.ok) throw new Error();
     const data = await response.json();
+    if (request !== archiveRequest) return;
     if (!data.items.length) {
       stateLabel.textContent = query ? "일치하는 직무가 없습니다. 직접 입력하거나 다른 단어로 찾아보세요." : "아직 동기화된 직무가 없습니다. 직접 입력해 먼저 작성할 수 있습니다.";
       return;
@@ -921,6 +1189,7 @@ async function searchJobs(query) {
     stateLabel.textContent = `${data.items.length.toLocaleString("ko-KR")}개 직무를 찾았습니다.`;
     data.items.forEach(profile => results.append(createJobResult(profile)));
   } catch {
+    if (request !== archiveRequest) return;
     stateLabel.textContent = "직무 데이터를 불러오지 못했습니다. 직접 입력으로 계속 진행할 수 있습니다.";
   }
 }
@@ -950,6 +1219,7 @@ function createJobResult(profile) {
 }
 
 function selectJob(profile) {
+  for (const field of ["reference_catalog_id", "reference_source_url", "reference_name", "reference_version"]) state[field] = "";
   state.institution = profile.institution_name || "";
   state.target_job = profile.job_title || "";
   state.ncs_path = profile.ncs_path || (profile.ncs_categories || []).join(" · ");
@@ -1064,7 +1334,11 @@ function bindPage() {
   $("#change-job").addEventListener("click", openJobDialog);
   $("#open-sources").addEventListener("click", () => { $("#source-dialog").showModal(); loadSources(); });
   $("#footer-sources").addEventListener("click", () => { $("#source-dialog").showModal(); loadSources(); });
-  $("#job-search-form").addEventListener("submit", event => { event.preventDefault(); searchJobs($("#job-search").value); });
+  $("#job-search-form").addEventListener("submit", event => { event.preventDefault(); searchArchive($("#job-search").value); });
+  $$('input[name="archive-scope"]').forEach(input => input.addEventListener("change", event => setArchiveScope(event.target.value)));
+  $("#catalog-previous").addEventListener("click", () => searchArchive(catalogQuery, Math.max(0, catalogOffset - CATALOG_PAGE_SIZE)));
+  $("#catalog-next").addEventListener("click", () => searchArchive(catalogQuery, catalogOffset + CATALOG_PAGE_SIZE));
+  $("#job-dialog").addEventListener("close", () => { archiveRequest += 1; clearCatalogDetail(); });
   $("#use-manual-job").addEventListener("click", () => {
     closeDialog("job-dialog");
     if ($("#workspace").hidden) showWorkspace();

@@ -30,6 +30,26 @@ class MarkupScan(HTMLParser):
 
 
 class FrontendStaticTests(unittest.TestCase):
+    def test_standard_catalog_is_separate_from_institution_jobs(self) -> None:
+        markup = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        javascript = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        for required in (
+            'name="archive-scope" value="catalog" checked',
+            'name="archive-scope" value="jobs"',
+            'id="catalog-source-state"', 'id="catalog-detail"',
+            "NCS 직무능력 참고", "기관별 채용 직무",
+            "미수집·인증 대기는 정부에 자료가 없다는 뜻이 아닙니다",
+        ):
+            self.assertIn(required, markup)
+        self.assertIn('api("/api/data-coverage")', javascript)
+        self.assertIn("정부 전체 자료의 총수가 아닙니다", javascript)
+        self.assertIn("이 정보원에서 제공하지 않는 항목", javascript)
+        catalog = javascript.split('let archiveScope = "catalog";', 1)[1].split("async function searchJobs(", 1)[0]
+        self.assertNotIn(".innerHTML", catalog)
+        self.assertNotIn("item.raw", catalog)
+        self.assertNotIn("state.institution =", catalog)
+        self.assertIn("비어 있는 항목에 참고 자료 적용", catalog)
+
     def test_markup_supports_strict_content_security_policy(self) -> None:
         scan = MarkupScan()
         scan.feed((ROOT / "web" / "index.html").read_text(encoding="utf-8"))

@@ -410,6 +410,31 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .modal-header { position: sticky; top: 0; z-index: 2; padding: 28px 30px 20px; display: flex; justify-content: space-between; align-items: flex-start; background: rgba(255,253,248,.96); border-bottom: 1px solid var(--line); }
 .modal-header h2 { margin: 0; color: var(--navy); font-size: 28px; letter-spacing: -.045em; }
 .icon-button { width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 50%; background: transparent; cursor: pointer; font-size: 24px; line-height: 1; }
+.archive-scope { margin: 24px 30px 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; border: 0; }
+.archive-scope legend { margin-bottom: 10px; color: var(--navy); font-size: 14px; font-weight: 800; }
+.archive-scope label { min-height: 44px; padding: 10px 13px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; cursor: pointer; }
+.archive-scope label:has(input:checked) { background: var(--navy); color: var(--white); }
+.archive-scope input { accent-color: var(--accent); }
+.catalog-intro, .catalog-coverage { margin: 10px 30px; font-size: 13px; overflow-wrap: anywhere; }
+.catalog-intro { color: var(--navy); }
+.catalog-coverage { padding: 12px 14px; border-left: 3px solid var(--gold); color: #555e65; background: var(--paper); white-space: pre-line; }
+.catalog-coverage > p { margin: 0; }
+.catalog-coverage summary { min-height: 44px; padding: 10px 0; color: var(--navy); cursor: pointer; font-weight: 800; white-space: normal; }
+.catalog-coverage details { margin-top: 6px; white-space: normal; }
+.catalog-coverage article { padding: 12px 0; border-top: 1px solid var(--line); }
+.catalog-coverage article strong { display: block; color: var(--navy); }
+.catalog-coverage article p { margin: 5px 0; }
+.catalog-coverage article a { min-height: 44px; display: inline-flex; align-items: center; color: var(--navy); }
+.catalog-pagination { margin: 16px 30px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.catalog-pagination > span { color: var(--muted); font-size: 12px; }
+.catalog-detail { margin: 20px 30px; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); overflow-wrap: anywhere; }
+.catalog-detail h3 { margin: 0 0 8px; color: var(--navy); font-size: 20px; }
+.catalog-detail p { margin: 8px 0; font-size: 13px; white-space: pre-line; }
+.catalog-detail dl { margin: 16px 0; }
+.catalog-detail dt { margin-top: 12px; color: var(--navy); font-size: 13px; font-weight: 800; }
+.catalog-detail dd { margin: 3px 0 0; color: #555e65; font-size: 13px; white-space: pre-line; }
+.catalog-detail a { min-height: 44px; display: inline-flex; align-items: center; color: var(--navy); text-underline-offset: 3px; }
+.catalog-detail .button { margin-top: 8px; width: 100%; white-space: normal; }
 .search-form { padding: 25px 30px 12px; }
 .search-form label { display: block; margin-bottom: 8px; color: var(--navy); font-size: 12px; font-weight: 800; }
 .search-control { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
@@ -419,6 +444,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .job-result { width: 100%; min-height: 92px; padding: 15px 16px; display: grid; grid-template-columns: 1fr auto; gap: 15px; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: white; cursor: pointer; }
 .job-result:hover { border-color: var(--accent); }
 .job-result strong { display: block; color: var(--navy); font-size: 15px; }
+.job-result > div { min-width: 0; overflow-wrap: anywhere; }
 .job-result small { display: block; margin-top: 3px; color: var(--muted); }
 .job-result .result-tags { margin-top: 9px; display: flex; flex-wrap: wrap; gap: 4px; }
 .result-tags span { padding: 2px 6px; background: var(--paper); color: #656b70; font-size: 9px; }
@@ -523,6 +549,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .modal { width: 100%; max-height: 92vh; margin: auto 0 0; border-radius: 14px 14px 0 0; }
   .modal-header, .search-form { padding-left: 20px; padding-right: 20px; }
   .search-state, .job-results, .source-list { padding-left: 20px; padding-right: 20px; }
+  .archive-scope, .catalog-intro, .catalog-coverage, .catalog-pagination, .catalog-detail { margin-left: 20px; margin-right: 20px; }
+  .catalog-detail { padding: 16px; }
+  .catalog-pagination { justify-content: flex-start; }
   .manual-choice, .modal-intro, .policy-link, .result-score, .warning-list, .draft-output { margin-left: 20px; margin-right: 20px; }
   .manual-choice { align-items: stretch; flex-direction: column; }
   .result-actions { padding-left: 20px; padding-right: 20px; }

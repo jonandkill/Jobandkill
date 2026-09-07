@@ -9,10 +9,17 @@
   const ITEM_SEPARATOR = new RegExp(`\\n+|${PYTHON_SPACE}*[;|]${PYTHON_SPACE}*`, "u");
   const TEXT_LIMITS = {
     institution: 300, target_job: 300, ncs_path: 1000, matched_duty: 1000, matched_skill: 1000,
+    reference_catalog_id: 64, reference_source_url: 200, reference_name: 100, reference_version: 30,
     experience_title: 300, organization: 300, period_start: 30, period_end: 30, role: 500,
     situation: 4000, objective: 4000, judgment: 4000, collaboration: 4000, result: 4000,
     evidence: 4000, contribution: 4000, learning: 4000
   };
+  const REFERENCE_SOURCES = {
+    "https://www.data.go.kr/data/15150267/openapi.do": "NCS 능력단위 공통정보",
+    "https://www.data.go.kr/data/15083321/fileData.do": "NCS 훈련기준 파일"
+  };
+  const REFERENCE_FIELDS = ["reference_catalog_id", "reference_source_url", "reference_name", "reference_version"];
+  const REFERENCE_VERSION = /^(?:[0-9]{1,4}(?:v[0-9]{1,3})?|[0-9]{4}-[0-9]{2}-[0-9]{2}|미제공)$/u;
   const RESIDENT_REGISTRATION_NUMBER = /(?<!\p{Decimal_Number})\p{Decimal_Number}{6}\s*-?\s*[1-8]\p{Decimal_Number}{6}(?!\p{Decimal_Number})/u;
   const BLIND_PATTERNS = [
     ["출신학교", /(?:대학교|대학원|고등학교|출신학교|학번)/u],
@@ -117,13 +124,25 @@
     for (const [field, limit] of Object.entries(TEXT_LIMITS)) {
       if (countCharacters(text(payload[field], Infinity)) > limit) errors[field] = `${field} 입력은 ${formatCount(limit)}자 이하여야 합니다.`;
     }
+    const reference = Object.fromEntries(REFERENCE_FIELDS.map(field => [field, payload[field] ?? ""]));
+    if (Object.values(reference).some(value => value !== "")) {
+      if (Object.values(reference).some(value => typeof value !== "string" || !value)) {
+        errors.reference_catalog = "NCS 참고자료의 출처 정보를 함께 확인해 주세요.";
+      } else {
+        if (reference.reference_catalog_id.length !== 64 || !/^[a-f0-9]{64}$/u.test(reference.reference_catalog_id)) errors.reference_catalog_id = "NCS 참고자료 기록이 올바르지 않습니다.";
+        const sourceName = Object.hasOwn(REFERENCE_SOURCES, reference.reference_source_url) ? REFERENCE_SOURCES[reference.reference_source_url] : null;
+        if (!sourceName) errors.reference_source_url = "등록된 정부 자료의 공식 출처 주소만 사용할 수 있습니다.";
+        else if (reference.reference_name !== sourceName) errors.reference_name = "NCS 참고자료 이름과 공식 출처가 일치하지 않습니다.";
+        if (!REFERENCE_VERSION.test(reference.reference_version) || /\s/u.test(reference.reference_version)) errors.reference_version = "NCS 참고자료의 기준 버전·일자를 확인해 주세요.";
+      }
+    }
     for (const field of ["actions", "tools"]) {
       const values = itemValues(payload[field]);
       if (values.length > 12) errors[field] = `${field} 항목은 최대 12개까지 입력할 수 있습니다.`;
       else if (values.some(item => countCharacters(text(item, Infinity)) > 1000)) errors[field] = `${field}의 각 항목은 1,000자 이하여야 합니다.`;
     }
     const sensitiveText = [
-      ...Object.keys(TEXT_LIMITS).map(field => text(payload[field], Infinity)),
+      ...Object.keys(TEXT_LIMITS).filter(field => field !== "reference_catalog_id").map(field => text(payload[field], Infinity)),
       ...["actions", "tools"].flatMap(field => itemValues(payload[field]).map(item => text(item, Infinity)))
     ].join(" ");
     if (RESIDENT_REGISTRATION_NUMBER.test(sensitiveText.normalize("NFKC"))) errors.personal_information = "주민등록번호는 입력하거나 저장할 수 없습니다.";
@@ -133,6 +152,7 @@
       institution: text(payload.institution, 300), target_job: text(payload.target_job, 300),
       ncs_path: text(payload.ncs_path, 1000), matched_duty: text(payload.matched_duty, 1000),
       matched_skill: text(payload.matched_skill, 1000), experience_title: text(payload.experience_title, 300),
+      ...Object.fromEntries(REFERENCE_FIELDS.map(field => [field, text(payload[field], TEXT_LIMITS[field])])),
       organization: text(payload.organization, 300), period_start: text(payload.period_start, 30),
       period_end: text(payload.period_end, 30), role: text(payload.role, 500),
       situation: text(payload.situation), objective: text(payload.objective), judgment: text(payload.judgment),
@@ -217,7 +237,14 @@
   function compose(payload) {
     const draft = sanitizeDraft(payload, true);
     delete draft.facts_confirmed;
-    const output = draft.style === "bullet" ? bullet(draft) : narrative(draft);
+    let output = draft.style === "bullet" ? bullet(draft) : narrative(draft);
+    if (draft.reference_catalog_id) output += "\n\n" + [
+      "[NCS 참고자료 — 기관별 채용요건 아님]",
+      `제공: 한국산업인력공단 / 자료: ${draft.reference_name} / 기준 버전·일자: ${draft.reference_version}`,
+      `출처: ${draft.reference_source_url}`,
+      `참고 기록: ${draft.reference_catalog_id}`,
+      "직무 이해를 위한 공통 기준이며, 사용자의 경험·성과를 증명하는 자료가 아닙니다."
+    ].join("\n");
     const { messages, missing } = warnings(draft, output);
     return {
       output, warnings: messages, missing_fields: missing, fact_coverage: (10 - missing.length) * 10,
@@ -226,7 +253,24 @@
     };
   }
 
-  const api = Object.freeze({ compose, sanitizeDraft, DraftValidationError });
+  function catalogReference(item) {
+    const expected = { "ncs-common": "NCS 능력단위 공통정보", "ncs-training-2025": "NCS 훈련기준 파일" };
+    if (!Object.hasOwn(expected, item.source_slug) || REFERENCE_SOURCES[item.source_url] !== expected[item.source_slug]) return null;
+    const proposed = String(item.version || "");
+    const sourceDate = String(item.source_updated_at || "").slice(0, 10);
+    const version = REFERENCE_VERSION.test(proposed) && !/\s/u.test(proposed) ? proposed
+      : /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(sourceDate) ? sourceDate : "미제공";
+    const reference = {
+      reference_catalog_id: item.id, reference_source_url: item.source_url,
+      reference_name: expected[item.source_slug], reference_version: version
+    };
+    try {
+      sanitizeDraft({ document_type: "career", style: "bullet", ...reference });
+      return reference;
+    } catch { return null; }
+  }
+
+  const api = Object.freeze({ compose, sanitizeDraft, catalogReference, DraftValidationError });
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else globalThis.JobAndKillComposer = api;
 })();

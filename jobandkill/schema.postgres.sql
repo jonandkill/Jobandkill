@@ -21,6 +21,59 @@ CREATE TABLE IF NOT EXISTS sources (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- National occupational standards are a reference catalog, never fake job ads.
+CREATE TABLE IF NOT EXISTS occupation_catalog (
+    id TEXT PRIMARY KEY,
+    source_slug TEXT NOT NULL,
+    external_key TEXT NOT NULL,
+    standard_code TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL DEFAULT '',
+    job_title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    ncs_path TEXT NOT NULL DEFAULT '',
+    level TEXT NOT NULL DEFAULT '',
+    training_hours TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL,
+    source_updated_at TEXT NOT NULL DEFAULT '',
+    collected_at TIMESTAMPTZ NOT NULL,
+    content_hash TEXT NOT NULL,
+    raw_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    last_seen_run_id TEXT NOT NULL DEFAULT '',
+    UNIQUE(source_slug, external_key)
+);
+CREATE INDEX IF NOT EXISTS occupation_catalog_source_idx
+    ON occupation_catalog(source_slug, standard_code);
+CREATE INDEX IF NOT EXISTS occupation_catalog_seen_idx
+    ON occupation_catalog(last_seen_run_id);
+
+CREATE TABLE IF NOT EXISTS catalog_sync_runs (
+    id TEXT PRIMARY KEY,
+    source_slug TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('api', 'import')),
+    status TEXT NOT NULL CHECK (status IN ('running', 'partial', 'completed', 'failed', 'imported')),
+    next_page INTEGER NOT NULL DEFAULT 1,
+    reported_total INTEGER,
+    records_seen INTEGER NOT NULL DEFAULT 0,
+    unique_count INTEGER NOT NULL DEFAULT 0,
+    duplicates INTEGER NOT NULL DEFAULT 0,
+    source_file_hash TEXT NOT NULL DEFAULT '',
+    error_summary TEXT NOT NULL DEFAULT '',
+    started_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS catalog_sync_source_idx
+    ON catalog_sync_runs(source_slug, mode, started_at);
+
+CREATE TABLE IF NOT EXISTS catalog_sync_pages (
+    run_id TEXT NOT NULL REFERENCES catalog_sync_runs(id) ON DELETE CASCADE,
+    page_no INTEGER NOT NULL,
+    page_hash TEXT NOT NULL,
+    records_seen INTEGER NOT NULL,
+    PRIMARY KEY(run_id, page_no),
+    UNIQUE(run_id, page_hash)
+);
+
 CREATE TABLE IF NOT EXISTS sync_runs (
     id BIGSERIAL PRIMARY KEY,
     source_id BIGINT NOT NULL REFERENCES sources(id),

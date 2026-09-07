@@ -49,6 +49,8 @@ from .db import (
     public_stats,
     search_profiles,
 )
+from .catalog import get_catalog_item, list_catalog
+from .data_sources import data_coverage
 from .privacy import (
     PrivacyError,
     login_consents,
@@ -63,6 +65,7 @@ from .writer import DraftValidationError, compose
 WEB_ROOT = (ROOT / "web").resolve()
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_SEARCH_OFFSET = 1_000
+MAX_CATALOG_OFFSET = 2_000_000
 
 
 def _json_default(value: Any) -> str:
@@ -338,19 +341,23 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
         self._json(status, response, headers)
 
     def _api_get(self, path: str, query: dict[str, list[str]]) -> None:
-        if path == "/api/jobs":
+        if path in {"/api/jobs", "/api/catalog"}:
             try:
                 limit = int(query.get("limit", ["20"])[0])
                 offset = int(query.get("offset", ["0"])[0])
             except ValueError:
                 self._error(HTTPStatus.BAD_REQUEST, "pagination", "limit과 offset은 숫자여야 합니다.")
                 return
-            if offset < 0 or offset > MAX_SEARCH_OFFSET:
+            offset_max = MAX_CATALOG_OFFSET if path == "/api/catalog" else MAX_SEARCH_OFFSET
+            if offset < 0 or offset > offset_max:
                 self._error(
                     HTTPStatus.BAD_REQUEST,
                     "pagination",
-                    f"offset은 0~{MAX_SEARCH_OFFSET:,} 범위여야 합니다.",
+                    f"offset은 0~{offset_max:,} 범위여야 합니다.",
                 )
+                return
+            if path == "/api/catalog" and (not 1 <= limit <= 100 or len(query.get("q", [""])[0]) > 200):
+                self._error(HTTPStatus.BAD_REQUEST, "catalog_query", "검색어는 200자, limit은 1~100 범위여야 합니다.")
                 return
 
         response: Any = None
@@ -363,6 +370,22 @@ class JobAndKillHandler(BaseHTTPRequestHandler):
                 elif path == "/api/stats":
                     route_found = True
                     response = {"stats": public_stats(connection)}
+                elif path == "/api/data-coverage":
+                    route_found = True
+                    response = data_coverage(connection)
+                elif path == "/api/catalog":
+                    route_found = True
+                    if connection.dialect == "postgres":
+                        connection.execute("SET LOCAL statement_timeout = '2000ms'")
+                    items = list_catalog(connection, query.get("q", [""])[0], limit, offset)
+                    response = {"items": items, "count": len(items), "offset": offset}
+                elif catalog_match := re.fullmatch(r"/api/catalog/([0-9a-f]{64})", path):
+                    route_found = True
+                    item = get_catalog_item(connection, catalog_match.group(1))
+                    if not item:
+                        raise AuthError("catalog_not_found", "수집된 NCS 참고정보를 찾을 수 없습니다.", 404)
+                    item.pop("raw", None)
+                    response = {"item": item}
                 elif path == "/api/privacy-config":
                     route_found = True
                     response = public_privacy_config()

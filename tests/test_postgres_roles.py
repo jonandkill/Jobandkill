@@ -44,6 +44,13 @@ class PostgreSqlRuntimeRoleTests(unittest.TestCase):
         self.execute("web", "DELETE FROM users WHERE id=%s", (user_id,))
         self.assert_denied("web", "CREATE TABLE role_escape_test(id INTEGER)")
 
+    def test_catalog_roles_are_isolated(self) -> None:
+        for table in ("occupation_catalog", "catalog_sync_runs", "catalog_sync_pages"):
+            self.execute("web", f"SELECT * FROM {table} LIMIT 0")
+            self.execute("collector", f"SELECT * FROM {table} LIMIT 0")
+            self.assert_denied("web", f"DELETE FROM {table} WHERE FALSE")
+            self.assert_denied("cleanup", f"SELECT * FROM {table} LIMIT 0")
+
     def test_collector_cannot_read_or_modify_personal_tables(self) -> None:
         self.assertEqual(
             self.execute("collector", "SELECT current_user")[0][0],

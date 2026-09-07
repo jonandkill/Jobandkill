@@ -82,7 +82,10 @@ GRANT SELECT ON TABLE
   public.storage_namespaces,
   public.job_profiles,
   public.extraction_evidence,
-  public.rights_decisions
+  public.rights_decisions,
+  public.occupation_catalog,
+  public.catalog_sync_runs,
+  public.catalog_sync_pages
 TO jobandkill_web;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.users,
@@ -109,7 +112,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.storage_namespaces,
   public.job_profiles,
   public.extraction_evidence,
-  public.rights_decisions
+  public.rights_decisions,
+  public.occupation_catalog,
+  public.catalog_sync_runs,
+  public.catalog_sync_pages
 TO jobandkill_collector;
 GRANT USAGE ON SEQUENCE
   public.sources_id_seq,

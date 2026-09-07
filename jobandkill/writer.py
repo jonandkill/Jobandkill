@@ -13,6 +13,10 @@ TEXT_LIMITS = {
     "ncs_path": 1_000,
     "matched_duty": 1_000,
     "matched_skill": 1_000,
+    "reference_catalog_id": 64,
+    "reference_source_url": 200,
+    "reference_name": 100,
+    "reference_version": 30,
     "experience_title": 300,
     "organization": 300,
     "period_start": 30,
@@ -28,6 +32,12 @@ TEXT_LIMITS = {
     "learning": MAX_INPUT_LENGTH,
 }
 RESIDENT_REGISTRATION_NUMBER = re.compile(r"(?<!\d)\d{6}\s*-?\s*[1-8]\d{6}(?!\d)")
+REFERENCE_SOURCES = {
+    "https://www.data.go.kr/data/15150267/openapi.do": "NCS 능력단위 공통정보",
+    "https://www.data.go.kr/data/15083321/fileData.do": "NCS 훈련기준 파일",
+}
+REFERENCE_FIELDS = ("reference_catalog_id", "reference_source_url", "reference_name", "reference_version")
+REFERENCE_VERSION = re.compile(r"(?:[0-9]{1,4}(?:v[0-9]{1,3})?|[0-9]{4}-[0-9]{2}-[0-9]{2}|미제공)")
 
 BLIND_PATTERNS: dict[str, re.Pattern[str]] = {
     "출신학교": re.compile(r"(?:대학교|대학원|고등학교|출신학교|학번)"),
@@ -95,6 +105,20 @@ def sanitize_draft(payload: dict[str, Any], require_confirmation: bool = False) 
     for field, limit in TEXT_LIMITS.items():
         if len(_normalized_text(payload.get(field))) > limit:
             errors[field] = f"{field} 입력은 {limit:,}자 이하여야 합니다."
+    reference = {field: payload.get(field, "") for field in REFERENCE_FIELDS}
+    if any(value not in ("", None) for value in reference.values()):
+        if any(not isinstance(value, str) or not value for value in reference.values()):
+            errors["reference_catalog"] = "NCS 참고자료의 출처 정보를 함께 확인해 주세요."
+        else:
+            if not re.fullmatch(r"[a-f0-9]{64}", reference["reference_catalog_id"]):
+                errors["reference_catalog_id"] = "NCS 참고자료 기록이 올바르지 않습니다."
+            source_name = REFERENCE_SOURCES.get(reference["reference_source_url"])
+            if not source_name:
+                errors["reference_source_url"] = "등록된 정부 자료의 공식 출처 주소만 사용할 수 있습니다."
+            elif reference["reference_name"] != source_name:
+                errors["reference_name"] = "NCS 참고자료 이름과 공식 출처가 일치하지 않습니다."
+            if not REFERENCE_VERSION.fullmatch(reference["reference_version"]):
+                errors["reference_version"] = "NCS 참고자료의 기준 버전·일자를 확인해 주세요."
     for field in ("actions", "tools"):
         values = _item_values(payload.get(field))
         if len(values) > 12:
@@ -102,7 +126,7 @@ def sanitize_draft(payload: dict[str, Any], require_confirmation: bool = False) 
         elif any(len(_normalized_text(item)) > 1_000 for item in values):
             errors[field] = f"{field}의 각 항목은 1,000자 이하여야 합니다."
     sensitive_text = " ".join(
-        [_normalized_text(payload.get(field)) for field in TEXT_LIMITS]
+        [_normalized_text(payload.get(field)) for field in TEXT_LIMITS if field != "reference_catalog_id"]
         + [_normalized_text(item) for field in ("actions", "tools") for item in _item_values(payload.get(field))]
     )
     if contains_resident_registration_number(sensitive_text):
@@ -123,6 +147,7 @@ def sanitize_draft(payload: dict[str, Any], require_confirmation: bool = False) 
         "ncs_path": _text(payload.get("ncs_path"), 1_000),
         "matched_duty": _text(payload.get("matched_duty"), 1_000),
         "matched_skill": _text(payload.get("matched_skill"), 1_000),
+        **{field: _text(payload.get(field), TEXT_LIMITS[field]) for field in REFERENCE_FIELDS},
         "experience_title": _text(payload.get("experience_title"), 300),
         "organization": _text(payload.get("organization"), 300),
         "period_start": _text(payload.get("period_start"), 30),
@@ -275,6 +300,14 @@ def _warnings(draft: dict[str, Any], output: str) -> tuple[list[str], list[str]]
 def compose(payload: dict[str, Any]) -> dict[str, Any]:
     draft = normalize_draft(payload)
     output = _bullet(draft) if draft["style"] == "bullet" else _narrative(draft)
+    if draft["reference_catalog_id"]:
+        output += "\n\n" + "\n".join([
+            "[NCS 참고자료 — 기관별 채용요건 아님]",
+            f"제공: 한국산업인력공단 / 자료: {draft['reference_name']} / 기준 버전·일자: {draft['reference_version']}",
+            f"출처: {draft['reference_source_url']}",
+            f"참고 기록: {draft['reference_catalog_id']}",
+            "직무 이해를 위한 공통 기준이며, 사용자의 경험·성과를 증명하는 자료가 아닙니다.",
+        ])
     warnings, missing = _warnings(draft, output)
     completed = 10 - len(missing)
     return {

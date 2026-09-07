@@ -14,5 +14,7 @@ credentials*.json
 .venv/
 data/*.db
 data/*.db-*
+data/*.lock
 data/documents/
+data/source-downloads/
 tmp/

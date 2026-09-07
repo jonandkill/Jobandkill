@@ -28,6 +28,7 @@ CORPUS_TABLES = {
     "sources", "sync_runs", "institutions", "postings", "attachments",
     "document_objects", "document_gc_queue", "storage_namespaces", "job_profiles",
     "extraction_evidence", "rights_decisions",
+    "occupation_catalog", "catalog_sync_runs", "catalog_sync_pages",
 }
 PERSONAL_TABLES = {
     "users", "user_consents", "login_tokens", "sessions", "user_drafts",

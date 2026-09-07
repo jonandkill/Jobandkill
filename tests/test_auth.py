@@ -279,6 +279,10 @@ class AuthHttpTests(unittest.TestCase):
             "document_type": "career", "style": "bullet", "target_length": 800,
             "experience_title": "민원 기준 정비", "actions": ["민원 자료를 분류"],
             "facts_confirmed": False,
+            "reference_catalog_id": "a" * 64,
+            "reference_source_url": "https://www.data.go.kr/data/15083321/fileData.do",
+            "reference_name": "NCS 훈련기준 파일",
+            "reference_version": "2025-12-31",
         }
         with self.assertRaises(urllib.error.HTTPError) as raised:
             self.request("/api/user/drafts", {
@@ -292,6 +296,7 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(status, 201)
         self.assertEqual(created["revision"], 1)
         self.assertFalse(created["payload"]["facts_confirmed"])
+        self.assertEqual(created["payload"]["reference_source_url"], payload["reference_source_url"])
 
         update = urllib.request.Request(
             f"{self.base_url}/api/user/drafts/{created['id']}",
@@ -307,6 +312,10 @@ class AuthHttpTests(unittest.TestCase):
             updated = json.load(response)
         self.assertEqual(updated["revision"], 2)
         self.assertEqual(updated["current_step"], 5)
+        self.assertEqual(updated["payload"]["reference_catalog_id"], payload["reference_catalog_id"])
+        with self.opener.open(f"{self.base_url}/api/user/drafts/{created['id']}") as response:
+            restored = json.load(response)
+        self.assertEqual(restored["payload"]["reference_version"], "2025-12-31")
 
         wrong_client = urllib.request.Request(
             f"{self.base_url}/api/user/drafts/{created['id']}",
