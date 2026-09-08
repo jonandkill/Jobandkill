@@ -28,6 +28,10 @@ Node.js, Pandoc, XeLaTeX, Poppler, ImageMagick, Python 3의 ReportLab·pypdf가 
     chmod +x scripts/build.sh
     ./scripts/build.sh
 
+## GitHub Pages 최초 설정
+
+저장소 관리자가 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 한 번 지정한 뒤, `Build and publish public job guide` 워크플로를 다시 실행합니다. GitHub App 토큰에 저장소 관리자 권한이 없으면 Pages 최초 활성화만 자동 처리되지 않으며, EPUB·PDF·웹판 빌드와 Actions 아티팩트 생성은 그대로 완료됩니다.
+
 ## 출간 원칙
 
 지원 전 반드시 기관의 최신 공식 채용공고, 첨부 공고문, 직무기술서, FAQ와 정정공고를 확인해야 합니다. 이 책은 특정 기관의 공식 안내나 합격 보장이 아닙니다.
