@@ -49,19 +49,19 @@ jobs:
             docs/public-job-guide/site
       - name: Configure GitHub Pages
         id: pages
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         continue-on-error: true
         uses: actions/configure-pages@v5
         with:
           enablement: true
       - name: Upload GitHub Pages artifact
-        if: github.event_name == 'push' && steps.pages.outcome == 'success'
+        if: github.event_name != 'pull_request' && steps.pages.outcome == 'success'
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/public-job-guide/site
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/jobandkill1' && needs.build.outputs.pages_ready == 'success'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/jobandkill1' && needs.build.outputs.pages_ready == 'success'
     needs: build
     runs-on: ubuntu-latest
     environment:
