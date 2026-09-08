@@ -43,6 +43,8 @@
 - JavaScript 문법 검사 통과
 - DOM 삽입은 `textContent`를 사용하며 원자료를 HTML로 직접 주입하지 않음
 - 키보드 포커스, 본문 바로가기, 반응형 구간, 넓은 표의 가로 스크롤 안내 포함
+- GitHub 기본 브랜치 병합 및 Actions 출간 아티팩트 생성 완료
+- Pages 실서비스는 저장소 관리자가 `Settings → Pages → Source: GitHub Actions`를 최초 1회 지정한 뒤 워크플로 재실행 필요
 
 ## 출간 전 반드시 유지할 고지
 
