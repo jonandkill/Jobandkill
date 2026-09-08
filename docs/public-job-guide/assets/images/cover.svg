@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1800" viewBox="0 0 1200 1800" role="img" aria-labelledby="title desc">
+  <title id="title">전국 공공채용, 처음부터 합격까지 전자책 표지</title>
+  <desc id="desc">짙은 남색 바탕 위에 전국의 채용정보가 하나의 길로 연결되는 모습을 형상화한 표지</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#102C46"/>
+      <stop offset="1" stop-color="#174A7E"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="1800" fill="url(#bg)"/>
+  <rect x="72" y="72" width="1056" height="1656" rx="28" fill="none" stroke="#7DD3C7" stroke-width="3"/>
+  <text x="92" y="150" fill="#7DD3C7" font-family="Noto Sans KR, sans-serif" font-size="32" font-weight="700" letter-spacing="5">2026 DATA BOOK · JOB&amp;KILL</text>
+  <text x="92" y="360" fill="#FFFFFF" font-family="Noto Sans KR, sans-serif" font-size="110" font-weight="800">전국 공공채용,</text>
+  <text x="92" y="500" fill="#FFFFFF" font-family="Noto Sans KR, sans-serif" font-size="110" font-weight="800">처음부터 합격까지</text>
+  <text x="98" y="590" fill="#D9EAF7" font-family="Noto Sans KR, sans-serif" font-size="40" font-weight="500">일반 취준생을 위한 공공기관·공기업·지방공기업 실전 안내서</text>
+
+  <g transform="translate(95 760)">
+    <path d="M0 520 C170 430 215 250 390 320 C560 385 605 90 795 155 C875 182 930 125 1000 40" fill="none" stroke="#7DD3C7" stroke-width="18" stroke-linecap="round"/>
+    <circle cx="0" cy="520" r="35" fill="#FFFFFF"/>
+    <circle cx="390" cy="320" r="35" fill="#FFFFFF"/>
+    <circle cx="795" cy="155" r="35" fill="#FFFFFF"/>
+    <circle cx="1000" cy="40" r="44" fill="#FFBF47"/>
+    <path d="M940 52 L1008 2 L1024 86" fill="none" stroke="#FFBF47" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g transform="translate(92 1410)">
+    <rect width="302" height="112" rx="18" fill="#FFFFFF" opacity="0.1"/>
+    <text x="28" y="46" fill="#7DD3C7" font-family="Noto Sans KR, sans-serif" font-size="26" font-weight="700">JOB-ALIO</text>
+    <text x="28" y="86" fill="#FFFFFF" font-family="Noto Sans KR, sans-serif" font-size="40" font-weight="800">419건</text>
+    <rect x="327" width="302" height="112" rx="18" fill="#FFFFFF" opacity="0.1"/>
+    <text x="355" y="46" fill="#7DD3C7" font-family="Noto Sans KR, sans-serif" font-size="26" font-weight="700">CLEANEYE JOB+</text>
+    <text x="355" y="86" fill="#FFFFFF" font-family="Noto Sans KR, sans-serif" font-size="40" font-weight="800">360건</text>
+    <rect x="654" width="354" height="112" rx="18" fill="#FFFFFF" opacity="0.1"/>
+    <text x="682" y="46" fill="#7DD3C7" font-family="Noto Sans KR, sans-serif" font-size="26" font-weight="700">상세검증</text>
+    <text x="682" y="86" fill="#FFFFFF" font-family="Noto Sans KR, sans-serif" font-size="40" font-weight="800">26개 공고</text>
+  </g>
+
+  <text x="92" y="1650" fill="#D9EAF7" font-family="Noto Sans KR, sans-serif" font-size="30">기준 2026-09-09 KST · EPUB · PDF · WEB · XLSX</text>
+  <text x="92" y="1700" fill="#FFFFFF" font-family="Noto Sans KR, sans-serif" font-size="32" font-weight="700">JOB&amp;KILL 공공취업 편집팀</text>
+</svg>
+

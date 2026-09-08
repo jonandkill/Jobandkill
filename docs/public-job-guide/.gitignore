@@ -1,0 +1,9 @@
+dist/
+site/downloads/
+site/assets/recruitments.js
+site/book.html
+assets/images/*.png
+*.log
+*.aux
+*.out
+*.toc

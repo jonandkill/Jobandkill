@@ -1,0 +1,45 @@
+\usepackage{fontspec}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{setspace}
+\usepackage{enumitem}
+
+\XeTeXlinebreaklocale "ko"
+\XeTeXlinebreakskip=0pt plus 1pt
+\IfFontExistsTF{JNK Noto Sans KR 500}{
+  \setmainfont{JNK Noto Sans KR 500}[BoldFont={JNK Noto Sans KR 700},AutoFakeSlant=0.2]
+  \setsansfont{JNK Noto Sans KR 500}[BoldFont={JNK Noto Sans KR 700},AutoFakeSlant=0.2]
+  \setmonofont{JNK Noto Sans KR 500}[BoldFont={JNK Noto Sans KR 700}]
+}{
+  \setmainfont{Noto Sans CJK KR}[AutoFakeBold=2,AutoFakeSlant=0.2]
+  \setsansfont{Noto Sans CJK KR}[AutoFakeBold=2,AutoFakeSlant=0.2]
+  \setmonofont{Noto Sans CJK KR}[AutoFakeBold=2]
+}
+\setstretch{1.22}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlist{nosep}
+\definecolor{navy}{HTML}{15324B}
+\definecolor{teal}{HTML}{007B78}
+\definecolor{muted}{HTML}{566B78}
+\titleformat{\chapter}[display]
+  {\sffamily\bfseries\color{navy}\huge}
+  {}{0pt}{}
+\titleformat{\section}
+  {\sffamily\bfseries\color{navy}\LARGE}
+  {}{0pt}{}
+\titleformat{\subsection}
+  {\sffamily\bfseries\color{teal}\large}
+  {}{0pt}{}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small 전국 공공채용, 처음부터 합격까지}
+\fancyhead[R]{\small JOB\&KILL}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\setlength{\headheight}{15pt}

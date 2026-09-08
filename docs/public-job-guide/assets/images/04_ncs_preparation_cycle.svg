@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">NCS 준비의 반복 학습 사이클</title>
+  <desc id="desc">진단, 기본기, 유형 훈련, 시간 제한 모의, 오답 복기의 다섯 단계를 원형으로 반복하고 중앙에 목표 직무와 기관별 출제범위를 두는 개념도.</desc>
+  <defs>
+    <style>
+      text{font-family:"Pretendard","Noto Sans KR","Apple SD Gothic Neo",sans-serif;fill:#17324D}.title{font-size:34px;font-weight:800}.sub{font-size:17px;fill:#52606D}.step{font-size:19px;font-weight:800}.body{font-size:15px;fill:#52606D}.center{font-size:22px;font-weight:800}.white{fill:#fff}.n{font-size:15px;font-weight:800;fill:#fff}
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#17324D" flood-opacity="0.13"/></filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 10 5 0 10z" fill="#7C91A4"/></marker>
+  </defs>
+  <rect width="1200" height="675" fill="#F7FAFC"/>
+  <text x="64" y="66" class="title">NCS는 한 번에 끝내는 과목이 아니라 ‘반복 사이클’</text>
+  <text x="64" y="96" class="sub">매 회차 점수를 올리는 가장 짧은 경로는 진단과 오답 복기를 연결하는 것</text>
+
+  <path d="M565 161 C700 175 790 259 805 359" fill="none" stroke="#7C91A4" stroke-width="4" marker-end="url(#arrow)"/>
+  <path d="M806 392 C781 500 686 566 572 575" fill="none" stroke="#7C91A4" stroke-width="4" marker-end="url(#arrow)"/>
+  <path d="M533 575 C420 558 337 491 316 394" fill="none" stroke="#7C91A4" stroke-width="4" marker-end="url(#arrow)"/>
+  <path d="M313 359 C327 254 411 178 526 161" fill="none" stroke="#7C91A4" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <circle cx="560" cy="370" r="132" fill="#17324D" filter="url(#shadow)"/>
+  <text x="560" y="347" text-anchor="middle" class="center white">목표 직무</text>
+  <text x="560" y="378" text-anchor="middle" class="body white">기관별 출제영역·문항 수·시간</text>
+  <rect x="475" y="403" width="170" height="35" rx="17" fill="#2477B3"/>
+  <text x="560" y="426" text-anchor="middle" class="n">매 회차 기록</text>
+
+  <g filter="url(#shadow)">
+    <rect x="431" y="119" width="258" height="99" rx="22" fill="#EAF4FA" stroke="#2477B3" stroke-width="3"/>
+    <circle cx="466" cy="153" r="20" fill="#2477B3"/><text x="466" y="159" text-anchor="middle" class="n">1</text>
+    <text x="499" y="158" class="step">진단</text><text x="461" y="190" class="body">영역별 정확도·풀이시간 측정</text>
+
+    <rect x="751" y="221" width="319" height="106" rx="22" fill="#E9F5F1" stroke="#0F766E" stroke-width="3"/>
+    <circle cx="788" cy="257" r="20" fill="#0F766E"/><text x="788" y="263" text-anchor="middle" class="n">2</text>
+    <text x="821" y="262" class="step">기본기</text><text x="786" y="295" class="body">취약 개념과 계산법을 짧게 보완</text>
+
+    <rect x="751" y="429" width="319" height="106" rx="22" fill="#FFF1D6" stroke="#D97706" stroke-width="3"/>
+    <circle cx="788" cy="465" r="20" fill="#A85000"/><text x="788" y="471" text-anchor="middle" class="n">3</text>
+    <text x="821" y="470" class="step">유형 훈련</text><text x="786" y="503" class="body">풀이 순서와 포기 기준을 자동화</text>
+
+    <rect x="431" y="535" width="258" height="99" rx="22" fill="#F1ECFA" stroke="#6B4EA2" stroke-width="3"/>
+    <circle cx="466" cy="569" r="20" fill="#6B4EA2"/><text x="466" y="575" text-anchor="middle" class="n">4</text>
+    <text x="499" y="574" class="step">시간 모의</text><text x="461" y="606" class="body">실전 순서·마킹까지 동일하게</text>
+
+    <rect x="50" y="325" width="319" height="106" rx="22" fill="#FDE8E7" stroke="#B42318" stroke-width="3"/>
+    <circle cx="87" cy="361" r="20" fill="#B42318"/><text x="87" y="367" text-anchor="middle" class="n">5</text>
+    <text x="120" y="366" class="step">오답 복기</text><text x="85" y="399" class="body">오개념·시간초과·실수를 분류</text>
+  </g>
+
+  <rect x="50" y="506" width="300" height="92" rx="18" fill="#FFFFFF" stroke="#C8D7E3" stroke-width="2"/>
+  <text x="74" y="540" class="step" font-size="17">기록할 숫자 3개</text>
+  <text x="74" y="570" class="body">정확도 · 평균 시간 · 포기 문항</text>
+  <text x="600" y="655" text-anchor="middle" class="body">점수가 멈추면 문제 수를 늘리기보다 오답 원인 분류를 다시 시작</text>
+</svg>

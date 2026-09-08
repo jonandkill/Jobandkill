@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">공공기관 채용 지원 퍼널</title>
+  <desc id="desc">공고 탐색에서 최종 결과까지 여섯 단계로 좁혀 가는 채용 퍼널. 각 단계 옆에는 일반 취업준비생이 이탈을 줄이기 위해 확인할 질문이 배치되어 있다.</desc>
+  <defs>
+    <style>
+      text{font-family:"Pretendard","Noto Sans KR","Apple SD Gothic Neo",sans-serif;fill:#17324D}.title{font-size:34px;font-weight:800}.sub{font-size:17px;fill:#52606D}.stage{font-size:19px;font-weight:800;fill:#fff}.num{font-size:15px;font-weight:800}.q{font-size:17px;font-weight:700}.hint{font-size:14px;fill:#52606D}.white{fill:#fff}
+    </style>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%"><feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#17324D" flood-opacity="0.13"/></filter>
+  </defs>
+  <rect width="1200" height="675" fill="#F7FAFC"/>
+  <text x="64" y="66" class="title">공고를 ‘지원’으로 바꾸는 채용 퍼널</text>
+  <text x="64" y="96" class="sub">단계마다 한 가지 핵심 질문에 답하면 불필요한 지원 비용이 줄어든다</text>
+
+  <g filter="url(#shadow)">
+    <path d="M76 147 H646 L609 216 H113 Z" fill="#2477B3"/>
+    <path d="M113 228 H609 L572 297 H150 Z" fill="#2E8CA5"/>
+    <path d="M150 309 H572 L535 378 H187 Z" fill="#0F766E"/>
+    <path d="M187 390 H535 L498 459 H224 Z" fill="#2F855A"/>
+    <path d="M224 471 H498 L461 540 H261 Z" fill="#A85000"/>
+    <path d="M261 552 H461 L424 621 H298 Z" fill="#17324D"/>
+  </g>
+  <g text-anchor="middle" class="stage">
+    <text x="361" y="190">1. 공고 탐색</text>
+    <text x="361" y="271">2. 자격 적합</text>
+    <text x="361" y="352">3. 직무 적합</text>
+    <text x="361" y="433">4. 서류·필기</text>
+    <text x="361" y="514">5. 면접</text>
+    <text x="361" y="595">6. 최종 결과</text>
+  </g>
+
+  <g>
+    <circle cx="725" cy="181" r="24" fill="#DCEFF8"/><text x="725" y="187" text-anchor="middle" class="num">01</text>
+    <text x="762" y="177" class="q">마감 전인 공고인가?</text><text x="762" y="201" class="hint">등록일이 아니라 접수 마감일을 본다</text>
+
+    <circle cx="725" cy="262" r="24" fill="#DCEFF8"/><text x="725" y="268" text-anchor="middle" class="num">02</text>
+    <text x="762" y="258" class="q">필수조건을 모두 충족하는가?</text><text x="762" y="282" class="hint">우대사항과 지원자격을 구분한다</text>
+
+    <circle cx="725" cy="343" r="24" fill="#E4F3EF"/><text x="725" y="349" text-anchor="middle" class="num">03</text>
+    <text x="762" y="339" class="q">직무기술서의 일을 원하는가?</text><text x="762" y="363" class="hint">기관보다 직무·근무지를 우선한다</text>
+
+    <circle cx="725" cy="424" r="24" fill="#E4F3EF"/><text x="725" y="430" text-anchor="middle" class="num">04</text>
+    <text x="762" y="420" class="q">전형별 합격 기준을 준비했는가?</text><text x="762" y="444" class="hint">NCS·전공·논술·자소서를 분리 관리한다</text>
+
+    <circle cx="725" cy="505" r="24" fill="#FFF1D6"/><text x="725" y="511" text-anchor="middle" class="num">05</text>
+    <text x="762" y="501" class="q">경험을 근거로 말할 수 있는가?</text><text x="762" y="525" class="hint">STAR 구조와 기관 이슈를 연결한다</text>
+
+    <circle cx="725" cy="586" r="24" fill="#E6EFF5"/><text x="725" y="592" text-anchor="middle" class="num">06</text>
+    <text x="762" y="582" class="q">결과를 다음 지원에 남겼는가?</text><text x="762" y="606" class="hint">점수·질문·피드백을 기록한다</text>
+  </g>
+  <path d="M1095 153 v456" stroke="#C8D7E3" stroke-width="3" stroke-dasharray="7 8"/>
+  <text x="1107" y="385" transform="rotate(90 1107 385)" text-anchor="middle" class="hint">검증이 깊어질수록 지원 품질이 높아짐</text>
+</svg>

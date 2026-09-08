@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">공공기관 채용공고 판독 체크리스트</title>
+  <desc id="desc">채용공고 문서의 지원자격, 지역 제한, 고용형태, 전형, 제출서류, 우대와 가점을 차례로 확인하는 방법. 필수조건과 우대조건을 혼동하지 말라는 경고를 포함한다.</desc>
+  <defs>
+    <style>
+      text{font-family:"Pretendard","Noto Sans KR","Apple SD Gothic Neo",sans-serif;fill:#17324D}.title{font-size:34px;font-weight:800}.sub{font-size:17px;fill:#52606D}.doc-h{font-size:20px;font-weight:800}.body{font-size:15px}.call{font-size:17px;font-weight:800}.small{font-size:14px;fill:#52606D}.white{fill:#fff}.wire{stroke:#52606D;stroke-width:2.5;fill:none}
+    </style>
+    <filter id="shadow" x="-15%" y="-10%" width="130%" height="130%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#17324D" flood-opacity="0.14"/></filter>
+  </defs>
+  <rect width="1200" height="675" fill="#F7FAFC"/>
+  <text x="64" y="66" class="title">채용공고, 이 순서로 읽으면 놓치지 않는다</text>
+  <text x="64" y="96" class="sub">제목만 보고 지원하지 말고 원문 공고의 ‘필수 → 전형 → 증빙’ 순서를 확인</text>
+
+  <rect x="398" y="132" width="405" height="490" rx="18" fill="#FFFFFF" stroke="#C8D7E3" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="398" y="132" width="405" height="72" rx="18" fill="#17324D"/>
+  <rect x="398" y="185" width="405" height="19" fill="#17324D"/>
+  <text x="428" y="177" class="doc-h white">○○공사 신입직원 채용공고</text>
+  <g class="body">
+    <rect x="427" y="229" width="347" height="53" rx="9" fill="#FDE8E7" stroke="#B42318" stroke-width="2"/>
+    <text x="445" y="252" font-weight="800" fill="#8A1C15">1. 지원자격·결격사유</text><text x="445" y="273">학력·연령·병역·자격증·경력</text>
+    <rect x="427" y="296" width="347" height="53" rx="9" fill="#FFF1D6" stroke="#D97706" stroke-width="2"/>
+    <text x="445" y="319" font-weight="800" fill="#8A4B00">2. 지역·대상 제한</text><text x="445" y="340">거주지·이전지역인재·보훈·장애</text>
+    <rect x="427" y="363" width="347" height="53" rx="9" fill="#EAF4FA" stroke="#2477B3" stroke-width="2"/>
+    <text x="445" y="386" font-weight="800">3. 고용형태·근무조건</text><text x="445" y="407">정규·인턴·기간제 / 직급·보수·근무지</text>
+    <rect x="427" y="430" width="347" height="53" rx="9" fill="#E9F5F1" stroke="#0F766E" stroke-width="2"/>
+    <text x="445" y="453" font-weight="800">4. 전형·평가기준</text><text x="445" y="474">서류·필기·인성·면접 / 배수·과락</text>
+    <rect x="427" y="497" width="347" height="53" rx="9" fill="#EEF2F6" stroke="#52606D" stroke-width="2"/>
+    <text x="445" y="520" font-weight="800">5. 제출서류·증빙시점</text><text x="445" y="541">블라인드 위반·파일형식·발급기준일</text>
+    <rect x="427" y="564" width="347" height="37" rx="9" fill="#F1ECFA" stroke="#6B4EA2" stroke-width="2"/>
+    <text x="445" y="588" font-weight="800">6. 우대·가점 중복 적용 여부</text>
+  </g>
+
+  <g>
+    <rect x="61" y="163" width="269" height="104" rx="18" fill="#FDE8E7" stroke="#B42318" stroke-width="2"/>
+    <text x="84" y="198" class="call" fill="#8A1C15">지원 가능 여부</text>
+    <text x="84" y="226" class="small">하나라도 미충족이면 접수보다</text><text x="84" y="247" class="small">다음 공고 탐색이 우선</text>
+    <path d="M330 218 H383" class="wire"/>
+    <circle cx="390" cy="218" r="7" fill="#B42318"/>
+
+    <rect x="61" y="306" width="269" height="104" rx="18" fill="#FFF1D6" stroke="#D97706" stroke-width="2"/>
+    <text x="84" y="341" class="call" fill="#8A4B00">제한경쟁 확인</text>
+    <text x="84" y="369" class="small">지역·대상 요건은 ‘우대’가 아니라</text><text x="84" y="390" class="small">응시 자체의 조건일 수 있음</text>
+    <path d="M330 361 H383" class="wire"/>
+    <circle cx="390" cy="361" r="7" fill="#D97706"/>
+
+    <rect x="61" y="449" width="269" height="104" rx="18" fill="#E9F5F1" stroke="#0F766E" stroke-width="2"/>
+    <text x="84" y="484" class="call">준비 난이도 계산</text>
+    <text x="84" y="512" class="small">남은 기간과 전형 과목을 보고</text><text x="84" y="533" class="small">실행 가능한 지원인지 판단</text>
+    <path d="M330 504 H383" class="wire"/>
+    <circle cx="390" cy="504" r="7" fill="#0F766E"/>
+  </g>
+
+  <g>
+    <rect x="870" y="177" width="269" height="126" rx="18" fill="#17324D"/>
+    <text x="896" y="214" class="call white">필수와 우대는 다르다</text>
+    <text x="896" y="245" class="body white">필수: 없으면 지원 불가</text>
+    <text x="896" y="272" class="body white">우대: 충족 시 가점·동점 우선</text>
+    <path d="M817 251 H862" class="wire"/>
+
+    <rect x="870" y="347" width="269" height="177" rx="18" fill="#FFFFFF" stroke="#C8D7E3" stroke-width="2"/>
+    <text x="896" y="386" class="call">마지막 3분 점검</text>
+    <text x="896" y="423" class="body">□ 접수 완료 화면 저장</text>
+    <text x="896" y="455" class="body">□ 지원서 PDF 보관</text>
+    <text x="896" y="487" class="body">□ 원문 공고·직무기술서 저장</text>
+    <path d="M817 436 H862" class="wire"/>
+  </g>
+  <text x="600" y="652" text-anchor="middle" class="small">체크 결과는 지원 관리표에 남겨 다음 공고 비교 기준으로 재사용</text>
+</svg>
