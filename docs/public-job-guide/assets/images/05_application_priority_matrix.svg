@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">공공기관 지원 우선순위 매트릭스</title>
+  <desc id="desc">직무 적합도를 세로축, 준비 부담을 가로축으로 둔 사분면. 적합도가 높고 준비 부담이 낮은 공고는 즉시 지원하고, 적합도와 부담이 모두 높은 공고는 전략적으로 선택하도록 안내한다.</desc>
+  <defs>
+    <style>
+      text{font-family:"Pretendard","Noto Sans KR","Apple SD Gothic Neo",sans-serif;fill:#17324D}.title{font-size:34px;font-weight:800}.sub{font-size:17px;fill:#52606D}.quad{font-size:22px;font-weight:800}.body{font-size:15px;fill:#52606D}.axis{font-size:16px;font-weight:800}.pill{font-size:14px;font-weight:800}.white{fill:#fff}
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 10 5 0 10z" fill="#17324D"/></marker>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%"><feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#17324D" flood-opacity="0.12"/></filter>
+  </defs>
+  <rect width="1200" height="675" fill="#F7FAFC"/>
+  <text x="64" y="66" class="title">지원할 공고가 많을 때: 우선순위 매트릭스</text>
+  <text x="64" y="96" class="sub">‘좋아 보이는 기관’보다 직무 적합도와 이번 전형의 준비 부담으로 판단</text>
+
+  <g filter="url(#shadow)">
+    <rect x="173" y="146" width="394" height="207" fill="#E9F5F1"/>
+    <rect x="567" y="146" width="394" height="207" fill="#FFF1D6"/>
+    <rect x="173" y="353" width="394" height="207" fill="#EEF2F6"/>
+    <rect x="567" y="353" width="394" height="207" fill="#FDE8E7"/>
+  </g>
+  <path d="M173 580 V126" stroke="#17324D" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M153 560 H984" stroke="#17324D" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="567" y1="146" x2="567" y2="560" stroke="#FFFFFF" stroke-width="4"/>
+  <line x1="173" y1="353" x2="961" y2="353" stroke="#FFFFFF" stroke-width="4"/>
+
+  <g>
+    <rect x="204" y="176" width="100" height="31" rx="15" fill="#0F766E"/>
+    <text x="254" y="197" text-anchor="middle" class="pill white">1순위</text>
+    <text x="204" y="241" class="quad">즉시 지원</text>
+    <text x="204" y="276" class="body">기존 준비물을 재사용하고</text>
+    <text x="204" y="299" class="body">마감 전 완성도에 집중</text>
+    <text x="204" y="329" class="pill" fill="#0F766E">적합도 높음 · 부담 낮음</text>
+
+    <rect x="598" y="176" width="100" height="31" rx="15" fill="#A85000"/>
+    <text x="648" y="197" text-anchor="middle" class="pill white">2순위</text>
+    <text x="598" y="241" class="quad">전략 지원</text>
+    <text x="598" y="276" class="body">합격 가능성과 학습 효과를</text>
+    <text x="598" y="299" class="body">비교해 선택적으로 투자</text>
+    <text x="598" y="329" class="pill" fill="#8A4B00">적합도 높음 · 부담 높음</text>
+
+    <rect x="204" y="383" width="100" height="31" rx="15" fill="#52606D"/>
+    <text x="254" y="404" text-anchor="middle" class="pill white">보류</text>
+    <text x="204" y="448" class="quad">경험 목적</text>
+    <text x="204" y="483" class="body">지원 시간 상한을 정하고</text>
+    <text x="204" y="506" class="body">핵심 지원을 방해하지 않게 함</text>
+    <text x="204" y="536" class="pill" fill="#52606D">적합도 낮음 · 부담 낮음</text>
+
+    <rect x="598" y="383" width="100" height="31" rx="15" fill="#B42318"/>
+    <text x="648" y="404" text-anchor="middle" class="pill white">후순위</text>
+    <text x="598" y="448" class="quad">원칙적 제외</text>
+    <text x="598" y="483" class="body">기관 선호만으로 지원하지 말고</text>
+    <text x="598" y="506" class="body">다음 적합 공고를 탐색</text>
+    <text x="598" y="536" class="pill" fill="#8A1C15">적합도 낮음 · 부담 높음</text>
+  </g>
+
+  <text x="570" y="618" text-anchor="middle" class="axis">준비 부담 낮음  ←  준비 부담  →  준비 부담 높음</text>
+  <text x="110" y="353" transform="rotate(-90 110 353)" text-anchor="middle" class="axis">직무 적합도 낮음  ←  직무 적합도  →  직무 적합도 높음</text>
+  <rect x="995" y="179" width="150" height="318" rx="18" fill="#FFFFFF" stroke="#C8D7E3" stroke-width="2"/>
+  <text x="1019" y="216" class="quad" font-size="18">판단 질문</text>
+  <text x="1019" y="258" class="body">① 해본 일과</text><text x="1019" y="280" class="body">연결되는가?</text>
+  <text x="1019" y="331" class="body">② 새로 준비할</text><text x="1019" y="353" class="body">전형은 몇 개인가?</text>
+  <text x="1019" y="404" class="body">③ 마감까지</text><text x="1019" y="426" class="body">완성 가능한가?</text>
+  <text x="1019" y="474" class="pill" fill="#2477B3">감이 아닌 기록으로</text>
+</svg>

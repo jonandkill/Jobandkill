@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">전국 공공채용 전자책 공유 이미지</title>
+  <desc id="desc">779개 채용정보와 실전 전략을 담은 JOB&amp;KILL 전자책 안내 이미지</desc>
+  <rect width="1200" height="630" fill="#17324D"/>
+  <rect x="56" y="52" width="1088" height="526" rx="24" fill="#F3F7FA"/>
+  <rect x="56" y="52" width="24" height="526" rx="12" fill="#0F766E"/>
+  <text x="120" y="130" fill="#0F766E" font-family="Noto Sans KR, sans-serif" font-size="28" font-weight="800" letter-spacing="3">2026 PUBLIC JOBS DATA BOOK</text>
+  <text x="120" y="238" fill="#17324D" font-family="Noto Sans KR, sans-serif" font-size="74" font-weight="900">전국 공공채용,</text>
+  <text x="120" y="330" fill="#17324D" font-family="Noto Sans KR, sans-serif" font-size="74" font-weight="900">처음부터 합격까지</text>
+  <text x="124" y="395" fill="#52606D" font-family="Noto Sans KR, sans-serif" font-size="30">공공기관·공기업·지방공기업 일반 취준생 실전 안내서</text>
+  <g transform="translate(122 456)">
+    <rect width="210" height="66" rx="33" fill="#DCEAF7"/>
+    <text x="105" y="44" text-anchor="middle" fill="#17324D" font-family="Noto Sans KR, sans-serif" font-size="27" font-weight="800">전체 779행</text>
+    <rect x="230" width="210" height="66" rx="33" fill="#D9EAD3"/>
+    <text x="335" y="44" text-anchor="middle" fill="#1B5E20" font-family="Noto Sans KR, sans-serif" font-size="27" font-weight="800">상세검증 26</text>
+    <rect x="460" width="310" height="66" rx="33" fill="#FCE8B2"/>
+    <text x="615" y="44" text-anchor="middle" fill="#8A4B08" font-family="Noto Sans KR, sans-serif" font-size="27" font-weight="800">EPUB · PDF · WEB · XLSX</text>
+  </g>
+  <text x="1090" y="530" text-anchor="end" fill="#17324D" font-family="Noto Sans KR, sans-serif" font-size="26" font-weight="700">JOB&amp;KILL</text>
+</svg>
+

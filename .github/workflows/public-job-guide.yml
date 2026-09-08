@@ -1,0 +1,67 @@
+name: Build and publish public job guide
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "docs/public-job-guide/**"
+      - ".github/workflows/public-job-guide.yml"
+  push:
+    branches:
+      - jobandkill1
+    paths:
+      - "docs/public-job-guide/**"
+      - ".github/workflows/public-job-guide.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: public-job-guide-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs/public-job-guide
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install publishing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc texlive-xetex texlive-latex-extra poppler-utils librsvg2-bin imagemagick zip epubcheck fonts-noto-cjk python3-reportlab python3-pypdf
+      - name: Build EPUB, PDF and web edition
+        run: |
+          chmod +x scripts/build.sh
+          ./scripts/build.sh
+      - name: Upload publication artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-job-guide-2026
+          path: |
+            docs/public-job-guide/dist
+            docs/public-job-guide/site
+      - name: Configure GitHub Pages
+        if: github.event_name == 'push'
+        uses: actions/configure-pages@v5
+      - name: Upload GitHub Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/public-job-guide/site
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/jobandkill1'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
