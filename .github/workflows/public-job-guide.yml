@@ -25,6 +25,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      pages_ready: ${{ steps.pages.outcome }}
     defaults:
       run:
         working-directory: docs/public-job-guide
@@ -46,18 +48,20 @@ jobs:
             docs/public-job-guide/dist
             docs/public-job-guide/site
       - name: Configure GitHub Pages
+        id: pages
         if: github.event_name == 'push'
+        continue-on-error: true
         uses: actions/configure-pages@v5
         with:
           enablement: true
       - name: Upload GitHub Pages artifact
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && steps.pages.outcome == 'success'
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/public-job-guide/site
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/jobandkill1'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/jobandkill1' && needs.build.outputs.pages_ready == 'success'
     needs: build
     runs-on: ubuntu-latest
     environment:
