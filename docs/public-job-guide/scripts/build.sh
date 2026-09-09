@@ -52,8 +52,13 @@ pandoc \
   --toc --toc-depth=2 \
   --include-in-header=styles/header.tex \
   -V documentclass=book \
+  -V classoption=openany \
+  -V classoption=oneside \
   -V papersize=a4 \
-  -V geometry:margin=22mm \
+  -V geometry:top=20mm \
+  -V geometry:bottom=20mm \
+  -V geometry:left=21mm \
+  -V geometry:right=21mm \
   -V fontsize=11pt \
   -V colorlinks=true \
   manuscript/00-frontmatter.md \
@@ -66,6 +71,18 @@ python3 scripts/assemble-pdf.py \
   assets/images/cover.png \
   dist/public-sector-job-guide-ko-2026.interior.pdf \
   dist/public-sector-job-guide-ko-2026.pdf
+
+pandoc \
+  --from=markdown+pipe_tables+smart \
+  --resource-path="$ROOT" \
+  --pdf-engine=xelatex \
+  --toc --toc-depth=2 \
+  --include-in-header=styles/research-header.tex \
+  -V papersize=a4 \
+  -V geometry:margin=18mm \
+  -V fontsize=10pt \
+  research/benchmark-and-selection.md \
+  -o dist/ebook-benchmark-and-selection-2026.pdf
 
 pandoc \
   --from=markdown+pipe_tables+raw_tex+smart \
@@ -84,6 +101,7 @@ pandoc \
   --metadata-file=metadata/book.yaml \
   --resource-path="$ROOT" \
   --standalone --toc --toc-depth=2 \
+  --template=styles/standalone.html \
   --embed-resources \
   --css=site/assets/styles.css \
   manuscript/00-frontmatter.md \
@@ -114,12 +132,25 @@ if [ -f data/대한민국_공공기관_전국채용_일반취준생_통합판_20
   sha256sum data/대한민국_공공기관_전국채용_일반취준생_통합판_2026-09-09.xlsx >> dist/SHA256SUMS
 fi
 
+rm -f dist/대한민국_공공채용_전자책_판매용_2026.zip
+zip -j -q dist/대한민국_공공채용_전자책_판매용_2026.zip \
+  dist/public-sector-job-guide-ko-2026.pdf \
+  dist/public-sector-job-guide-ko-2026.epub \
+  dist/public-sector-job-guide-ko-2026.html \
+  data/recruitments-2026-09-09.csv \
+  data/대한민국_공공기관_전국채용_일반취준생_통합판_2026-09-09.xlsx
+sha256sum dist/대한민국_공공채용_전자책_판매용_2026.zip >> dist/SHA256SUMS
+
 test "$(node -p "require('./data/summary.json').totalRows")" = "779"
 test -s site/assets/recruitments.js
 test -s site/book.html
 test -s dist/public-sector-job-guide-ko-2026.epub
 test -s dist/public-sector-job-guide-ko-2026.pdf
 test -s dist/public-sector-job-guide-ko-2026.html
+test -s dist/ebook-benchmark-and-selection-2026.pdf
+test -s dist/대한민국_공공채용_전자책_판매용_2026.zip
+
+python3 scripts/validate-publication.py
 
 rm -f dist/public-sector-job-guide-ko-2026.interior.pdf
 echo "빌드 완료: $ROOT/dist"

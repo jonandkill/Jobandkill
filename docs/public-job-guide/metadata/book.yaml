@@ -1,21 +1,22 @@
 ---
 title: "전국 공공채용, 처음부터 합격까지"
-subtitle: "일반 취준생을 위한 공공기관·공기업·지방공기업 데이터북"
+subtitle: "기관의 판단 구조를 읽고 지원자격·전형·면접으로 연결하는 2026 실전 지도"
 author:
-  - "JOB&KILL 공공취업 편집팀"
+  - "정대영 · 잡앤킬"
 lang: ko-KR
-date: 2026-09-09
-date-modified: 2026-09-09
-publisher: "JOB&KILL"
-rights: "원고·삽화 CC BY 4.0, 코드 MIT"
+date: 2026-09-10
+date-modified: 2026-09-10
+publisher: "잡앤킬"
+rights: "© 2026 정대영, 잡앤킬. All rights reserved."
 identifier: "urn:uuid:33792d46-0090-4fdc-8ef7-010c4e30964d"
-description: "전국 공공부문 모집 중 채용 779건과 일반 취업준비생의 지원판정·NCS·면접·지역·자격증 전략을 연결한 실전 전자책"
+description: "전국 공공부문 모집 중 채용 779건을 바탕으로 일반 취업준비생의 기관 선택, 지원판정, NCS, 면접, 지역요건과 자격증 전략을 조직의 판단 구조와 연결한 실전 전자책"
 subject:
   - 공공기관 취업
   - 공기업 채용
   - 지방공기업
   - NCS
   - 면접
+  - 사회복지사
+  - 장애인 채용
 cover-image: assets/images/cover.png
 ---
-

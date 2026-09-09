@@ -1,43 +1,34 @@
 # 전국 공공채용, 처음부터 합격까지
 
-일반 취업준비생을 위한 대한민국 공공기관·공기업·지방공기업 데이터북 겸 실전 전자책입니다.
+정대영·잡앤킬의 판매용 개정판 소스입니다. 전국 공공기관·공기업·지방공기업·지방출자출연기관에 지원하는 일반 취업준비생을 대상으로, 2026-09-09 KST 공식 채용 포털 스냅샷 779건과 조직의 판단 구조·지원판정·NCS·면접·지역·자격증 전략을 연결합니다.
 
-## 완성 산출물
+## 판매용 개정판
 
-- dist/public-sector-job-guide-ko-2026.epub
-- dist/public-sector-job-guide-ko-2026.pdf
-- dist/public-sector-job-guide-ko-2026.html
-- site/ GitHub Pages 정적 웹북
-- data/recruitments-2026-09-09.csv 전국 모집 중 채용 스냅샷
-- data/대한민국_공공기관_전국채용_일반취준생_통합판_2026-09-09.xlsx
+- 저자: 정대영 · 잡앤킬
+- 본문: 11pt / 기준선 20.35pt(185%)
+- 제목: 19pt / 14pt / 12pt
+- 형식: PDF · EPUB · 독립 HTML · 검색형 웹북 · XLSX · CSV
+- 삽화: 외부 사진과 기관 로고 없이 자체 제작한 설명형 SVG
+- 출간 원칙: 실제 지원 전 최신 공식 공고·첨부·직무기술서·FAQ·정정공고 확인
 
-## 데이터 범위
+## 빌드
 
-- 기준시점: 2026-09-09 KST
-- JOB-ALIO 진행 중: 419건, 127개 기관
-- Cleaneye Job+ 모집 중: 360건, 183개 기관
-- 합계: 779행
-- JOB-ALIO 상세 페이지 검증: 일반 취준생 우선공고 26건
-
-Cleaneye의 모집중 결과에는 중복 및 장기 미마감 표기가 포함됩니다. 원자료를 삭제하지 않고 데이터품질 열로 구분했습니다. 이 저장소의 제목 기반 분류는 탐색을 돕는 편집부 파생값이며 지원자격을 확정하지 않습니다.
-
-## 로컬 빌드
-
-Node.js, Pandoc, XeLaTeX, Poppler, ImageMagick, Python 3의 ReportLab·pypdf가 필요합니다.
+Node.js, Pandoc, XeLaTeX, Poppler, ImageMagick, Inkscape 또는 rsvg-convert, Python 3의 ReportLab·pypdf가 필요합니다.
 
     chmod +x scripts/build.sh
     ./scripts/build.sh
 
-## GitHub Pages 최초 설정
+빌드 결과는 `dist/`에 생성되며 GitHub Actions 아티팩트에도 보존됩니다.
 
-저장소 관리자가 **Settings → Pages → Build and deployment → Source**를 **GitHub Actions**로 한 번 지정한 뒤, `Build and publish public job guide` 워크플로를 **Run workflow**로 실행하거나 기존 기본 브랜치 실행을 재실행합니다. GitHub App 토큰에 저장소 관리자 권한이 없으면 Pages 최초 활성화만 자동 처리되지 않으며, EPUB·PDF·웹판 빌드와 Actions 아티팩트 생성은 그대로 완료됩니다.
+## 데이터 범위
 
-## 출간 원칙
+- JOB-ALIO 진행 중: 419건, 127개 기관
+- Cleaneye Job+ 모집 중: 360건, 183개 기관
+- 합계: 779행
+- JOB-ALIO 상세 페이지 검증: 우선공고 26건
 
-지원 전 반드시 기관의 최신 공식 채용공고, 첨부 공고문, 직무기술서, FAQ와 정정공고를 확인해야 합니다. 이 책은 특정 기관의 공식 안내나 합격 보장이 아닙니다.
+779행은 기준일 현재 두 포털이 반환한 스냅샷이며 모든 기관의 영구 명부나 접수 가능성을 보증하지 않습니다.
 
-원고·삽화는 LICENSE-CONTENT.md, 사이트 코드와 빌드 스크립트는 LICENSE-CODE를 따릅니다.
+## 라이선스
 
-## GitHub 배포
-
-저장소의 `docs/public-job-guide/`에 이 디렉터리를 두고, 포함된 워크플로를 저장소 루트의 `.github/workflows/public-job-guide.yml`로 복사합니다. 풀 리퀘스트에서는 출간 파일을 빌드해 검증하고, 기본 브랜치에 병합하면 GitHub Pages 배포를 실행합니다. 저장소 설정에서 Pages 소스를 **GitHub Actions**로 지정해야 합니다.
+판매용 개정판 원고·편집·표지·추가 삽화는 `LICENSE-CONTENT.md`, 코드와 빌드 스크립트는 `LICENSE-CODE`를 따릅니다. 이전 공개 초판의 CC BY 4.0 허락은 해당 공개판에 한해 유지됩니다.

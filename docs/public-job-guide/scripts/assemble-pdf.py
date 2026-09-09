@@ -16,8 +16,8 @@ def make_cover(image_path: Path, cover_pdf: Path) -> None:
     draw_w, draw_h = image_w * scale, image_h * scale
     pdf = canvas.Canvas(str(cover_pdf), pagesize=A4)
     pdf.setTitle("전국 공공채용, 처음부터 합격까지")
-    pdf.setAuthor("JOB&KILL 공공취업 편집팀")
-    pdf.setSubject("일반 취준생을 위한 공공기관·공기업·지방공기업 데이터북")
+    pdf.setAuthor("정대영 · 잡앤킬")
+    pdf.setSubject("기관의 판단 구조를 읽고 지원자격·전형·면접으로 연결하는 2026 실전 지도")
     pdf.drawImage(
         image,
         (page_w - draw_w) / 2,
@@ -37,16 +37,14 @@ def assemble(image_path: Path, interior_path: Path, output_path: Path) -> None:
     cover = PdfReader(str(cover_pdf))
     interior = PdfReader(str(interior_path))
     writer = PdfWriter()
-    for page in cover.pages:
-        writer.add_page(page)
-    for page in interior.pages:
-        writer.add_page(page)
+    writer.clone_document_from_reader(interior)
+    writer.insert_page(cover.pages[0], 0)
     metadata = dict(interior.metadata or {})
     metadata.update({
         "/Title": "전국 공공채용, 처음부터 합격까지",
-        "/Author": "JOB&KILL 공공취업 편집팀",
-        "/Subject": "일반 취준생을 위한 공공기관·공기업·지방공기업 데이터북",
-        "/Keywords": "공공기관, 공기업, 지방공기업, NCS, 면접",
+        "/Author": "정대영 · 잡앤킬",
+        "/Subject": "기관의 판단 구조를 읽고 지원자격·전형·면접으로 연결하는 2026 실전 지도",
+        "/Keywords": "공공기관, 공기업, 지방공기업, NCS, 면접, 사회복지사, 장애인 채용",
     })
     writer.add_metadata({k: str(v) for k, v in metadata.items() if k.startswith("/") and v is not None})
     with output_path.open("wb") as stream:

@@ -8,6 +8,10 @@
 \usepackage{titlesec}
 \usepackage{setspace}
 \usepackage{enumitem}
+\usepackage{needspace}
+\usepackage{etoolbox}
+\usepackage{caption}
+\usepackage[section]{placeins}
 
 \XeTeXlinebreaklocale "ko"
 \XeTeXlinebreakskip=0pt plus 1pt
@@ -20,26 +24,58 @@
   \setsansfont{Noto Sans CJK KR}[AutoFakeBold=2,AutoFakeSlant=0.2]
   \setmonofont{Noto Sans CJK KR}[AutoFakeBold=2]
 }
-\setstretch{1.22}
+
+% 11pt 본문에 20.35pt 기준선: 185% 행간
+\makeatletter
+\renewcommand\normalsize{\@setfontsize\normalsize{11pt}{20.35pt}}
+\renewcommand\small{\@setfontsize\small{9.5pt}{15.8pt}}
+\makeatother
+\normalsize
+
+% 홀수 쪽 강제 시작과 불필요한 백지 방지
+\let\cleardoublepage\clearpage
+\raggedbottom
+
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{0.55em}
-\setlist{nosep}
+\setlength{\parskip}{0.35em plus 0.08em minus 0.04em}
+\setlist{topsep=0.35em,itemsep=0.12em,parsep=0pt,partopsep=0pt}
+
+\clubpenalty=10000
+\widowpenalty=10000
+\displaywidowpenalty=10000
+\brokenpenalty=10000
+\hyphenpenalty=7000
+\exhyphenpenalty=7000
+
 \definecolor{navy}{HTML}{15324B}
 \definecolor{teal}{HTML}{007B78}
 \definecolor{muted}{HTML}{566B78}
-\titleformat{\chapter}[display]
-  {\sffamily\bfseries\color{navy}\huge}
+\definecolor{gold}{HTML}{B78A32}
+
+\titleformat{\chapter}[hang]
+  {\sffamily\bfseries\color{navy}\fontsize{19pt}{25pt}\selectfont}
   {}{0pt}{}
+\titlespacing*{\chapter}{0pt}{0pt}{14pt}
 \titleformat{\section}
-  {\sffamily\bfseries\color{navy}\LARGE}
+  {\sffamily\bfseries\color{navy}\fontsize{14pt}{20pt}\selectfont}
   {}{0pt}{}
+\titlespacing*{\section}{0pt}{24pt}{7pt}
 \titleformat{\subsection}
-  {\sffamily\bfseries\color{teal}\large}
+  {\sffamily\bfseries\color{teal}\fontsize{12pt}{18pt}\selectfont}
   {}{0pt}{}
+\titlespacing*{\subsection}{0pt}{18pt}{5pt}
+
+\pretocmd{\section}{\Needspace{5\baselineskip}}{}{}
+\pretocmd{\subsection}{\Needspace{4\baselineskip}}{}{}
+
+\captionsetup{font=small,labelfont=bf,skip=6pt}
+\setlength{\textfloatsep}{12pt plus 2pt minus 2pt}
+\setlength{\intextsep}{12pt plus 2pt minus 2pt}
+
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small 전국 공공채용, 처음부터 합격까지}
-\fancyhead[R]{\small JOB\&KILL}
+\fancyhead[R]{\small 정대영 · 잡앤킬}
 \fancyfoot[C]{\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
-\setlength{\headheight}{15pt}
+\setlength{\headheight}{16pt}

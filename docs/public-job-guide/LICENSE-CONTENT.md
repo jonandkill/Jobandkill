@@ -1,12 +1,13 @@
-# Creative Commons Attribution 4.0 International
+# 콘텐츠 이용 조건
 
-원고와 자체 제작 삽화는 Creative Commons Attribution 4.0 International License에 따라 이용할 수 있습니다.
+## 판매용 개정판
 
-저작자 표시 권장 문구:
+「전국 공공채용, 처음부터 합격까지」 판매용 개정판의 원고와 자체 제작 삽화에 관한 저작권은 정대영·잡앤킬에 있습니다.
 
-> JOB&KILL 공공취업 편집팀, 「전국 공공채용, 처음부터 합격까지」, 2026.
+© 2026 정대영, 잡앤킬. All rights reserved.
 
-라이선스 전문: https://creativecommons.org/licenses/by/4.0/legalcode
+저작권자의 사전 서면 허락 없이 전부 또는 일부를 복제·배포·전송·게시하거나 상업적으로 재사용할 수 없습니다. 기관명·공고명·공식 링크 등 사실정보와 제3자 권리는 이 저작권 고지의 대상이 아닙니다.
 
-기관명·공고명·공식 링크는 출처 식별을 위한 사실정보입니다. 기관 로고와 제3자 첨부파일은 이 라이선스에 포함되지 않습니다.
+## 2026년 9월 9일 공개 초판
 
+이전에 Creative Commons Attribution 4.0 International 조건으로 공개된 초판에 부여된 이용허락은 해당 공개판에 한해 계속 적용됩니다. 판매용 개정판의 새 원고, 편집, 표지와 추가 삽화에는 위의 판매용 개정판 조건이 적용됩니다.

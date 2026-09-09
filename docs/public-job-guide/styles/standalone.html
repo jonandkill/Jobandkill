@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="$lang$">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>$title$ — $subtitle$</title><meta name="description" content="$description$">
+  $for(css)$<link rel="stylesheet" href="$css$">$endfor$
+</head>
+<body>
+  <main id="book-main" class="page-shell content-layout">
+    <aside class="toc" aria-label="전자책 목차"><p class="toc__title">목차</p>$toc$</aside>
+    <article class="prose">
+      <header class="chapter-header"><p class="eyebrow">판매용 개정판 · 2026</p><h1>$title$</h1><p class="lead">$subtitle$</p><p><strong>정대영 · 잡앤킬</strong></p></header>
+      $body$
+    </article>
+  </main>
+</body>
+</html>
