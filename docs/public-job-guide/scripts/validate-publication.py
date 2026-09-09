@@ -92,7 +92,7 @@ for forbidden in ("편집·출간용 주의 문구", "제작 크레딧과 검수
     require(forbidden not in html_text, f"판매본에 내부 제작 문구가 남아 있습니다: {forbidden}")
 
 guide_text = GUIDE.read_text(encoding="utf-8")
-chapter_numbers = [int(n) for n in re.findall(r"^#\s+(\d+)\.", guide_text, flags=re.MULTILINE)]
+chapter_numbers = [int(n) for n in re.findall(r"^#\s+(\d+)장\.", guide_text, flags=re.MULTILINE)]
 checks["guide_chapter_numbers"] = chapter_numbers
 require(chapter_numbers == list(range(1, 14)), f"장 번호가 1~13 연속이 아닙니다: {chapter_numbers}")
 
