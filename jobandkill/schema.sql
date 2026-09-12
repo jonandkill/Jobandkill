@@ -1,6 +1,12 @@
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
 
+CREATE TABLE IF NOT EXISTS app_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY,
     slug TEXT NOT NULL UNIQUE,
@@ -16,6 +22,59 @@ CREATE TABLE IF NOT EXISTS sources (
     last_success_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- National occupational standards are a reference catalog, never fake job ads.
+CREATE TABLE IF NOT EXISTS occupation_catalog (
+    id TEXT PRIMARY KEY,
+    source_slug TEXT NOT NULL,
+    external_key TEXT NOT NULL,
+    standard_code TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL DEFAULT '',
+    job_title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    ncs_path TEXT NOT NULL DEFAULT '',
+    level TEXT NOT NULL DEFAULT '',
+    training_hours TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL,
+    source_updated_at TEXT NOT NULL DEFAULT '',
+    collected_at TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    raw_json TEXT NOT NULL DEFAULT '{}',
+    last_seen_run_id TEXT NOT NULL DEFAULT '',
+    UNIQUE(source_slug, external_key)
+);
+CREATE INDEX IF NOT EXISTS occupation_catalog_source_idx
+    ON occupation_catalog(source_slug, standard_code);
+CREATE INDEX IF NOT EXISTS occupation_catalog_seen_idx
+    ON occupation_catalog(last_seen_run_id);
+
+CREATE TABLE IF NOT EXISTS catalog_sync_runs (
+    id TEXT PRIMARY KEY,
+    source_slug TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('api', 'import')),
+    status TEXT NOT NULL CHECK (status IN ('running', 'partial', 'completed', 'failed', 'imported')),
+    next_page INTEGER NOT NULL DEFAULT 1,
+    reported_total INTEGER,
+    records_seen INTEGER NOT NULL DEFAULT 0,
+    unique_count INTEGER NOT NULL DEFAULT 0,
+    duplicates INTEGER NOT NULL DEFAULT 0,
+    source_file_hash TEXT NOT NULL DEFAULT '',
+    error_summary TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS catalog_sync_source_idx
+    ON catalog_sync_runs(source_slug, mode, started_at);
+
+CREATE TABLE IF NOT EXISTS catalog_sync_pages (
+    run_id TEXT NOT NULL REFERENCES catalog_sync_runs(id) ON DELETE CASCADE,
+    page_no INTEGER NOT NULL,
+    page_hash TEXT NOT NULL,
+    records_seen INTEGER NOT NULL,
+    PRIMARY KEY(run_id, page_no),
+    UNIQUE(run_id, page_hash)
 );
 
 CREATE TABLE IF NOT EXISTS sync_runs (
@@ -249,12 +308,29 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS user_consents (
+    id INTEGER PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    consent_type TEXT NOT NULL CHECK (consent_type IN ('privacy_policy', 'overseas_transfer')),
+    policy_version TEXT NOT NULL,
+    notice_url TEXT NOT NULL,
+    notice_sha256 TEXT NOT NULL,
+    request_token_hash TEXT NOT NULL,
+    accepted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    verified_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS user_consents_user_accepted_idx ON user_consents(user_id, accepted_at);
+CREATE INDEX IF NOT EXISTS user_consents_request_idx ON user_consents(request_token_hash);
+CREATE INDEX IF NOT EXISTS user_consents_pending_idx ON user_consents(verified_at, accepted_at);
+
 CREATE TABLE IF NOT EXISTS login_tokens (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at TEXT NOT NULL,
     used_at TEXT,
     request_subject_hash TEXT NOT NULL DEFAULT '',
+    intent_hash TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS login_tokens_expiry_idx ON login_tokens(expires_at);

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -530,6 +532,52 @@ class RightsPurgeTests(unittest.TestCase):
                 self.assertEqual(registered["state"], "ready")
                 self.assertEqual(profiles, 1)
                 self.assertTrue((document_root / attachment["storage_key"]).exists())
+
+    def test_unsafe_hwpx_fails_before_profile_evidence_or_object_is_written(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "unsafe-hwpx.db"
+            document_root = Path(directory) / "documents"
+            initialize(db_path)
+            record = self._record("P-1", "A-1")
+            record["attachments"][0]["name"] = "직무기술서.hwpx"
+            record["attachments"][0]["url"] = "https://www.ncs.go.kr/files/A-1.hwpx"
+            with connect(db_path) as connection:
+                ingest_records(connection, "data-go-kr-alio", [record], "https://www.data.go.kr/")
+            archive_buffer = io.BytesIO()
+            with zipfile.ZipFile(archive_buffer, "w") as archive:
+                archive.writestr("Contents/section0.xml", b"<root><t>safe</t></root>")
+                archive.writestr("../outside.xml", b"<root><t>unsafe</t></root>")
+            environment = {
+                "JOBNKILL_DOCUMENT_DIR": str(document_root),
+                "JOBNKILL_STORAGE_BACKEND": "local",
+            }
+            with patch.dict(os.environ, environment), patch(
+                "jobandkill.ingest._download",
+                return_value=(
+                    archive_buffer.getvalue(), "application/octet-stream",
+                    "https://www.ncs.go.kr/files/A-1.hwpx",
+                ),
+            ):
+                result = process_documents(db_path, 1)
+            self.assertEqual(result["failed"], 1)
+            self.assertEqual(result["parsed"], 0)
+            with connect(db_path) as connection:
+                attachment = connection.execute("SELECT * FROM attachments").fetchone()
+                extracted_profiles = connection.execute(
+                    "SELECT COUNT(*) AS count FROM job_profiles WHERE attachment_id IS NOT NULL"
+                ).fetchone()["count"]
+                evidence = connection.execute(
+                    "SELECT COUNT(*) AS count FROM extraction_evidence"
+                ).fetchone()["count"]
+                objects = connection.execute(
+                    "SELECT COUNT(*) AS count FROM document_objects"
+                ).fetchone()["count"]
+            self.assertEqual(attachment["parser_status"], "failed")
+            self.assertIn("안전 제한을 충족하지 않는 HWPX", attachment["rights_reason"])
+            self.assertIsNone(attachment["storage_key"])
+            self.assertEqual(extracted_profiles, 0)
+            self.assertEqual(evidence, 0)
+            self.assertEqual(objects, 0)
 
     def test_unchanged_url_is_periodically_requeued_for_digest_check(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

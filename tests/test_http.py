@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from jobandkill.server import JobAndKillServer
 
@@ -28,9 +30,55 @@ class HttpTests(unittest.TestCase):
     def test_health_and_security_headers(self) -> None:
         with urllib.request.urlopen(f"{self.base_url}/api/health") as response:
             data = json.load(response)
-            self.assertEqual(data["status"], "ok")
+            self.assertEqual(data, {"status": "ok"})
             self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
             self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
+
+        with urllib.request.urlopen(f"{self.base_url}/api/stats") as response:
+            data = json.load(response)
+            self.assertEqual(set(data), {"stats"})
+            self.assertTrue(
+                {"institutions", "postings", "profiles", "last_sync_at"}
+                <= set(data["stats"])
+            )
+
+    def test_production_adds_hsts(self) -> None:
+        # This test exercises the production header branch against its
+        # already-created test SQLite fixture, not a production DB connection.
+        with patch.dict(os.environ, {"JOBNKILL_ENV": "production"}), patch(
+            "jobandkill.db._production_environment", return_value=False,
+        ):
+            with urllib.request.urlopen(f"{self.base_url}/api/health") as response:
+                self.assertEqual(
+                    response.headers["Strict-Transport-Security"],
+                    "max-age=31536000; includeSubDomains",
+                )
+
+    def test_search_rejects_unbounded_offset(self) -> None:
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            urllib.request.urlopen(f"{self.base_url}/api/jobs?offset=1001")
+        self.assertEqual(raised.exception.code, 400)
+
+    def test_catalog_empty_and_coverage_are_honest(self) -> None:
+        with urllib.request.urlopen(f"{self.base_url}/api/catalog") as response:
+            data = json.load(response)
+            self.assertEqual(data["items"], [])
+        with urllib.request.urlopen(f"{self.base_url}/api/data-coverage") as response:
+            data = json.load(response)
+            self.assertFalse(data["all_government_data_complete"])
+            self.assertGreater(len(data["sources"]), 5)
+
+    def test_catalog_offset_and_unknown_id(self) -> None:
+        with urllib.request.urlopen(f"{self.base_url}/api/catalog?offset=13400") as response:
+            self.assertEqual(json.load(response)["items"], [])
+        for path, code in (("/api/catalog?offset=2000001", 400),
+                           ("/api/catalog?limit=x", 400),
+                           ("/api/catalog?limit=0", 400),
+                           ("/api/catalog?q=" + "x" * 201, 400),
+                           ("/api/catalog/" + "a" * 64, 404)):
+            with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as raised:
+                urllib.request.urlopen(self.base_url + path)
+            self.assertEqual(raised.exception.code, code)
 
     def test_compose_endpoint(self) -> None:
         payload = {
@@ -61,6 +109,24 @@ class HttpTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as raised:
             urllib.request.urlopen(request)
         self.assertEqual(raised.exception.code, 422)
+
+    def test_production_rejects_compose_without_parsing_or_composing_personal_data(self) -> None:
+        request = urllib.request.Request(
+            f"{self.base_url}/api/drafts/compose",
+            data=b'{"private-experience-secret": "not sent by the browser"}',
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with (
+            patch.dict(os.environ, {"JOBNKILL_ENV": "production"}),
+            patch("jobandkill.server.JobAndKillHandler._read_json") as read_json,
+            patch("jobandkill.server.compose") as compose,
+            self.assertRaises(urllib.error.HTTPError) as raised,
+        ):
+            urllib.request.urlopen(request)
+        self.assertEqual(raised.exception.code, 404)
+        self.assertEqual(json.load(raised.exception)["error"]["code"], "browser_compose_only")
+        read_json.assert_not_called()
+        compose.assert_not_called()
 
 
 if __name__ == "__main__":
