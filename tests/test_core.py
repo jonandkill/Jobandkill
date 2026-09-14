@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import io
 import json
+import stat
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 from jobandkill.db import connect, get_profile, initialize, public_stats, search_profiles
 from jobandkill.ingest import (
+    _hwpx_pages,
     extract_sections,
     get_attachment_rights_review,
     ingest_records,
@@ -220,6 +224,14 @@ class DatabaseTestCase(unittest.TestCase):
 
 
 class ParsingTests(unittest.TestCase):
+    @staticmethod
+    def hwpx(entries: list[tuple[str, bytes]], compression: int = zipfile.ZIP_STORED) -> bytes:
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", compression=compression) as archive:
+            for name, payload in entries:
+                archive.writestr(name, payload)
+        return output.getvalue()
+
     def test_json_and_xml_payloads(self) -> None:
         json_records, total = parse_api_payload(
             json.dumps({"response": {"body": {"items": [{"id": 1}], "totalCount": 1}}}).encode()
@@ -242,6 +254,77 @@ class ParsingTests(unittest.TestCase):
         self.assertIn("민원 자료를 분류한다", sections["duties"])
         self.assertIn("스프레드시트 활용 능력", sections["skills"])
         self.assertTrue(any(item["page_number"] == 2 for item in evidence))
+
+    def test_extraction_rejects_evidence_overflow_instead_of_silently_truncating(self) -> None:
+        page = "직무수행내용\n" + "\n".join(f"서로 다른 업무 항목 {index}" for index in range(101))
+        with self.assertRaisesRegex(ValueError, "추출 항목이 안전 한도"):
+            extract_sections([page])
+
+    def test_hwpx_accepts_bounded_section_xml_and_ignores_other_regular_files(self) -> None:
+        payload = self.hwpx([
+            ("mimetype", b"application/hwp+zip"),
+            ("Contents/section0.xml", "<root><t>직무수행내용</t><t>자료 분석</t></root>".encode()),
+        ])
+        self.assertEqual(_hwpx_pages(payload), ["직무수행내용\n자료 분석"])
+
+    def test_hwpx_rejects_oversized_archive_before_opening_members(self) -> None:
+        payload = self.hwpx([("Contents/section0.xml", b"<root><t>safe</t></root>")])
+        with patch("jobandkill.ingest.MAX_DOCUMENT_BYTES", len(payload) - 1):
+            with self.assertRaisesRegex(ValueError, "25MB 압축 파일 크기 제한"):
+                _hwpx_pages(payload)
+
+    def test_hwpx_rejects_member_count_and_unsafe_paths(self) -> None:
+        many = self.hwpx([
+            ("Contents/section0.xml", b"<root><t>safe</t></root>"),
+            ("mimetype", b"application/hwp+zip"),
+        ])
+        with patch("jobandkill.ingest.MAX_HWPX_MEMBERS", 1):
+            with self.assertRaisesRegex(ValueError, "압축 항목 수 제한"):
+                _hwpx_pages(many)
+        traversal = self.hwpx([
+            ("Contents/section0.xml", b"<root><t>safe</t></root>"),
+            ("../outside.xml", b"<root/>")
+        ])
+        with self.assertRaisesRegex(ValueError, "허용되지 않은 압축 항목 경로"):
+            _hwpx_pages(traversal)
+
+    def test_hwpx_rejects_member_and_total_uncompressed_limits(self) -> None:
+        oversized_member = self.hwpx([
+            ("Contents/section0.xml", b"<root><t>0123456789</t></root>")
+        ])
+        with patch("jobandkill.ingest.MAX_HWPX_MEMBER_BYTES", 16):
+            with self.assertRaisesRegex(ValueError, "개별 압축 항목 크기 제한"):
+                _hwpx_pages(oversized_member)
+        oversized_total = self.hwpx([
+            ("Contents/section0.xml", b"<root><t>a</t></root>"),
+            ("Preview/PrvText.txt", b"b" * 30),
+        ])
+        with patch("jobandkill.ingest.MAX_HWPX_UNCOMPRESSED_BYTES", 40):
+            with self.assertRaisesRegex(ValueError, "전체 압축 해제 크기 제한"):
+                _hwpx_pages(oversized_total)
+
+    def test_hwpx_rejects_unsupported_compression_and_extreme_ratio(self) -> None:
+        unsupported = self.hwpx(
+            [("Contents/section0.xml", b"<root><t>safe</t></root>")],
+            compression=zipfile.ZIP_BZIP2,
+        )
+        with self.assertRaisesRegex(ValueError, "지원하지 않는 압축 방식"):
+            _hwpx_pages(unsupported)
+        symlink_buffer = io.BytesIO()
+        symlink = zipfile.ZipInfo("Contents/section0.xml")
+        symlink.create_system = 3
+        symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(symlink_buffer, "w") as archive:
+            archive.writestr(symlink, b"mimetype")
+        with self.assertRaisesRegex(ValueError, "일반 파일이 아닌 압축 항목"):
+            _hwpx_pages(symlink_buffer.getvalue())
+        high_ratio = self.hwpx(
+            [("Contents/section0.xml", b"<root><t>" + b"a" * 2_000 + b"</t></root>")],
+            compression=zipfile.ZIP_DEFLATED,
+        )
+        with patch("jobandkill.ingest.MAX_HWPX_COMPRESSION_RATIO", 5):
+            with self.assertRaisesRegex(ValueError, "압축비 제한"):
+                _hwpx_pages(high_ratio)
 
 
 class WriterTests(unittest.TestCase):
@@ -290,6 +373,28 @@ class WriterTests(unittest.TestCase):
         result = compose(draft)
         self.assertIn("- 결과: [확인 필요]", result["output"])
         self.assertIn("결과", result["missing_fields"])
+
+    def test_oversized_input_is_rejected_instead_of_silently_truncated(self) -> None:
+        draft = self.base_draft()
+        draft["situation"] = "가" * 4_001
+        with self.assertRaises(DraftValidationError) as raised:
+            compose(draft)
+        self.assertIn("situation", raised.exception.errors)
+
+        draft = self.base_draft()
+        draft["actions"] = ["가" * 1_001]
+        with self.assertRaises(DraftValidationError) as raised:
+            compose(draft)
+        self.assertIn("actions", raised.exception.errors)
+
+    def test_resident_registration_number_is_rejected(self) -> None:
+        for identifier in ("900101-1234567", "９００１０１ - ５２３４５６７", "900101   8234567"):
+            with self.subTest(identifier=identifier):
+                draft = self.base_draft()
+                draft["evidence"] = f"확인용 {identifier}"
+                with self.assertRaises(DraftValidationError) as raised:
+                    compose(draft)
+                self.assertIn("personal_information", raised.exception.errors)
 
 
 if __name__ == "__main__":

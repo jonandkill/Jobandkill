@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: python -m pip install -r requirements.txt
+      - run: python -m pip install -r requirements-production.txt
       - run: python -m compileall -q jobandkill
       - run: python -m unittest discover -s tests -v
         env:
@@ -29,6 +29,8 @@ jobs:
         with:
           node-version: "22"
       - run: node --check web/app.js
+      - run: node --check web/composer.js
+      - run: node --test tests/test_composer.cjs
 
   postgres:
     runs-on: ubuntu-latest
@@ -57,6 +59,32 @@ jobs:
         env:
           JOBNKILL_TEST_POSTGRES_URL: postgresql://jobandkill:test-password@127.0.0.1:5432/jobandkill_test
           JOBNKILL_ENV: test
+      - name: Provision least-privilege runtime roles
+        run: psql --no-psqlrc --set ON_ERROR_STOP=1 --file scripts/provision_database_roles.sql
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: jobandkill_test
+          PGUSER: jobandkill
+          PGPASSWORD: test-password
+      - name: Set disposable CI-only role passwords
+        run: >-
+          psql --no-psqlrc --set ON_ERROR_STOP=1
+          --command "ALTER ROLE jobandkill_web PASSWORD 'web-test-password';
+          ALTER ROLE jobandkill_collector PASSWORD 'collector-test-password';
+          ALTER ROLE jobandkill_cleanup PASSWORD 'cleanup-test-password';"
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: jobandkill_test
+          PGUSER: jobandkill
+          PGPASSWORD: test-password
+      - name: Verify runtime role isolation
+        run: python -m unittest tests.test_postgres_roles -v
+        env:
+          JOBNKILL_TEST_WEB_POSTGRES_URL: postgresql://jobandkill_web:web-test-password@127.0.0.1:5432/jobandkill_test
+          JOBNKILL_TEST_COLLECTOR_POSTGRES_URL: postgresql://jobandkill_collector:collector-test-password@127.0.0.1:5432/jobandkill_test
+          JOBNKILL_TEST_CLEANUP_POSTGRES_URL: postgresql://jobandkill_cleanup:cleanup-test-password@127.0.0.1:5432/jobandkill_test
 
   container:
     runs-on: ubuntu-latest

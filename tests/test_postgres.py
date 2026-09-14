@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-from jobandkill.auth import AuthError, Session, create_draft, delete_draft, update_draft
+from jobandkill.auth import AuthError, Session, create_draft, delete_draft, update_draft, utcnow
 from jobandkill.db import connect, initialize, search_profiles
 from jobandkill.ingest import ingest_records, process_documents, set_attachment_rights
 
@@ -55,7 +55,7 @@ class PostgreSqlContractTests(unittest.TestCase):
         user_id = str(uuid.uuid4())
         email = f"postgres-{marker}@example.test"
         client_key = f"browser_{marker}"
-        session = Session(user_id, email, "session-hash", "csrf-hash")
+        session = Session(user_id, email, "session-hash", "csrf-hash", utcnow())
         payload = {
             "document_type": "career",
             "style": "bullet",

@@ -6,11 +6,34 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .auth import environment
-from .db import POSTGRES_TLS_MODES, postgres_sslmode, render_private_postgres_url
+from .db import (
+    POSTGRES_TLS_MODES,
+    postgres_sslmode,
+    render_private_postgres_url,
+    validate_production_database_target,
+)
+from .privacy import privacy_configuration_check
 
 
 def _check(name: str, ready: bool, message: str) -> dict[str, Any]:
     return {"name": name, "ready": ready, "message": message}
+
+
+def draft_retention_days(production: bool | None = None) -> int:
+    """Return the configured draft retention period without guessing in production."""
+    is_production = environment() == "production" if production is None else production
+    raw = os.getenv("JOBNKILL_DRAFT_RETENTION_DAYS", "").strip()
+    if not raw:
+        if is_production:
+            raise RuntimeError("운영에는 JOBNKILL_DRAFT_RETENTION_DAYS를 설정해야 합니다.")
+        return 30
+    try:
+        days = int(raw)
+    except ValueError as error:
+        raise RuntimeError("JOBNKILL_DRAFT_RETENTION_DAYS는 양의 정수여야 합니다.") from error
+    if days <= 0 or str(days) != raw:
+        raise RuntimeError("JOBNKILL_DRAFT_RETENTION_DAYS는 양의 정수여야 합니다.")
+    return days
 
 
 def configuration_report(
@@ -20,30 +43,65 @@ def configuration_report(
     require_storage: bool = True,
 ) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
-    database_url = os.getenv("JOBNKILL_DATABASE_URL", os.getenv("DATABASE_URL", "")).strip()
+    database_url = (
+        os.getenv("JOBNKILL_DATABASE_URL", "").strip()
+        if production
+        else os.getenv("JOBNKILL_DATABASE_URL", os.getenv("DATABASE_URL", "")).strip()
+    )
     postgres = database_url.startswith(("postgresql://", "postgres://"))
-    sslmode = postgres_sslmode(database_url) if postgres else ""
-    render_private_database = bool(
-        production
-        and postgres
-        and render_private_postgres_url(database_url)
+    try:
+        sslmode = postgres_sslmode(database_url) if postgres else ""
+        render_private_database = bool(
+            production
+            and postgres
+            and render_private_postgres_url(database_url)
+        )
+    except ValueError:
+        sslmode = ""
+        render_private_database = False
+    tls_ready = not production or sslmode in POSTGRES_TLS_MODES
+    role_ready = True
+    role_message = ""
+    if production:
+        expected_role = "collector" if collector_only else "web"
+        try:
+            validate_production_database_target(
+                database_url, expected_role=expected_role,
+            )
+        except RuntimeError as error:
+            role_ready = False
+            role_message = str(error)
+    database_ready = (
+        postgres and tls_ready and role_ready
+        if production else (postgres or not database_url)
     )
-    tls_ready = (
-        not production
-        or sslmode in POSTGRES_TLS_MODES
-        or render_private_database
-    )
-    database_ready = postgres and tls_ready if production else (postgres or not database_url)
     checks.append(_check(
         "database",
         database_ready,
-        (
-            "Render 비공개 PostgreSQL 연결 설정됨"
-            if render_private_database
-            else ("PostgreSQL TLS 설정됨" if tls_ready else "PostgreSQL sslmode=require 이상 필요")
-        ) if postgres
-        else ("SQLite 개발 모드" if not production else "운영 PostgreSQL URL 필요"),
+        role_message if production and not role_ready else (
+            (
+                "Render 비공개 PostgreSQL TLS 연결 설정됨"
+                if render_private_database and tls_ready
+                else (
+                    "PostgreSQL TLS 설정됨"
+                    if tls_ready else "PostgreSQL sslmode=require 이상 필요"
+                )
+            ) if postgres
+            else ("SQLite 개발 모드" if not production else "운영 PostgreSQL URL 필요")
+        ),
     ))
+    if production:
+        auto_migrate = os.getenv("JOBNKILL_AUTO_MIGRATE", "").strip()
+        migrations_ready = auto_migrate == "0"
+        checks.append(_check(
+            "automatic_migrations",
+            migrations_ready,
+            (
+                "운영 자동 마이그레이션 명시적으로 비활성화됨"
+                if migrations_ready
+                else "운영에는 JOBNKILL_AUTO_MIGRATE=0을 명시해야 함"
+            ),
+        ))
     if postgres:
         checks.append(_check(
             "postgres_driver", importlib.util.find_spec("psycopg") is not None,
@@ -66,27 +124,56 @@ def configuration_report(
             ))
 
     if not collector_only:
-        public = (
-            os.getenv("JOBNKILL_PUBLIC_URL", "").strip()
-            or os.getenv("RENDER_EXTERNAL_URL", "").strip()
-        )
+        public = os.getenv("JOBNKILL_PUBLIC_URL", "").strip()
+        if not public and not production:
+            public = os.getenv("RENDER_EXTERNAL_URL", "").strip()
         parsed = urlsplit(public) if public else None
         public_ready = bool(parsed and parsed.hostname and parsed.scheme == "https") if production else True
         checks.append(_check("public_url", public_ready, "HTTPS 공개 주소 설정됨" if public_ready and public else (
             "개발 기본 주소 사용" if not production else "운영 HTTPS 공개 주소 필요"
         )))
+        privacy_ready, privacy_message = privacy_configuration_check(production)
+        checks.append(_check("privacy_notices", privacy_ready, privacy_message))
         rate_ready = bool(os.getenv("JOBNKILL_AUTH_RATE_SECRET", "").strip()) if production else True
         checks.append(_check("auth_rate_limit", rate_ready, "인증 속도 제한 키 설정됨" if rate_ready and production else (
             "개발용 제한 사용" if not production else "인증 속도 제한 키 필요"
         )))
-        smtp_security = os.getenv("JOBNKILL_SMTP_SECURITY", "starttls").strip().lower()
-        smtp_ready = bool(
-            os.getenv("JOBNKILL_SMTP_HOST", "").strip() and os.getenv("JOBNKILL_SMTP_FROM", "").strip()
-            and (not production or smtp_security in {"starttls", "ssl"})
-        )
-        if not production and os.getenv("JOBNKILL_AUTH_DEV_SHOW_LINK", "0") == "1":
-            smtp_ready = True
-        checks.append(_check("login_mail", smtp_ready, "로그인 메일 전송 설정됨" if smtp_ready else "암호화된 SMTP 호스트·발신 주소 필요"))
+        transport = os.getenv("JOBNKILL_MAIL_TRANSPORT", "smtp").strip().lower()
+        if transport == "resend":
+            mail_ready = bool(
+                os.getenv("JOBNKILL_RESEND_API_KEY", "").strip()
+                and os.getenv("JOBNKILL_RESEND_FROM", "").strip()
+            )
+            mail_message = "Resend API 키와 발신 주소 설정됨" if mail_ready else "Resend API 키와 발신 주소 필요"
+        elif transport == "smtp":
+            smtp_security = os.getenv("JOBNKILL_SMTP_SECURITY", "starttls").strip().lower()
+            mail_ready = bool(
+                os.getenv("JOBNKILL_SMTP_HOST", "").strip() and os.getenv("JOBNKILL_SMTP_FROM", "").strip()
+                and (not production or smtp_security in {"starttls", "ssl"})
+            )
+            mail_message = "로그인 메일 전송 설정됨" if mail_ready else "암호화된 SMTP 호스트·발신 주소 필요"
+        else:
+            mail_ready = False
+            mail_message = "JOBNKILL_MAIL_TRANSPORT는 smtp 또는 resend여야 함"
+        if (
+            transport in {"smtp", "resend"}
+            and not production
+            and os.getenv("JOBNKILL_AUTH_DEV_SHOW_LINK", "0") == "1"
+        ):
+            mail_ready = True
+            mail_message = "개발용 로그인 링크 표시 사용"
+        checks.append(_check("login_mail", mail_ready, mail_message))
+    if not collector_only:
+        try:
+            draft_retention_days(production)
+            retention_ready = True
+        except RuntimeError:
+            retention_ready = False
+        checks.append(_check(
+            "draft_retention",
+            retention_ready,
+            "초안 보존 기간 설정됨" if retention_ready else "JOBNKILL_DRAFT_RETENTION_DAYS 양의 정수 필요",
+        ))
 
     if require_api:
         template = os.getenv("JOBNKILL_ALIO_API_URL_TEMPLATE", "").strip()

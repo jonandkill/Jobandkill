@@ -6,7 +6,7 @@ import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Mapping, Sequence
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -14,6 +14,16 @@ DEFAULT_DB_PATH = ROOT / "data" / "jobandkill.db"
 DatabaseTarget = Path | str
 Params = Sequence[Any] | Mapping[str, Any]
 POSTGRES_TLS_MODES = frozenset({"require", "verify-ca", "verify-full"})
+AUTO_MIGRATE_VALUES = frozenset({"0", "1"})
+PRODUCTION_DATABASE_USERS = {
+    "web": "jobandkill_web",
+    "collector": "jobandkill_collector",
+    "cleanup": "jobandkill_cleanup",
+}
+PRODUCTION_ADMIN_DATABASE_ROLE = "admin"
+PRODUCTION_ADMIN_DATABASE_USER = "jobandkill"
+CURRENT_SCHEMA_VERSION = 10
+SCHEMA_VERSION_KEY = "schema_version"
 
 
 def database_path() -> Path:
@@ -24,16 +34,130 @@ def database_path() -> Path:
     return path.resolve()
 
 
+def _production_environment() -> bool:
+    return os.getenv("JOBNKILL_ENV", "development").strip().lower() == "production"
+
+
+def _validate_production_database_target(
+    target: DatabaseTarget | None,
+    *,
+    expected_role: str | None = None,
+    administrator: bool = False,
+) -> str:
+    """Validate a production DSN without returning or reporting its secrets."""
+    if not isinstance(target, str) or not target.strip():
+        raise RuntimeError("운영에는 PostgreSQL URL이 필요합니다.")
+    database_url = target.strip()
+    try:
+        parsed = urlsplit(database_url)
+        username = unquote(parsed.username or "")
+    except ValueError:
+        raise RuntimeError("운영 PostgreSQL URL이 올바르지 않습니다.") from None
+    if (
+        not database_url.startswith(("postgresql://", "postgres://"))
+        or parsed.scheme not in {"postgresql", "postgres"}
+        or not parsed.hostname
+    ):
+        raise RuntimeError("운영에는 PostgreSQL URL이 필요합니다.")
+
+    configured_role = os.getenv("JOBNKILL_DATABASE_ROLE", "").strip()
+    if administrator:
+        if configured_role != PRODUCTION_ADMIN_DATABASE_ROLE:
+            raise RuntimeError(
+                "관리자 init은 JOBNKILL_DATABASE_ROLE=admin이 필요합니다."
+            )
+        if username != PRODUCTION_ADMIN_DATABASE_USER:
+            raise RuntimeError("관리자 init은 PostgreSQL 소유자 URL이 필요합니다.")
+        return database_url
+
+    expected_username = PRODUCTION_DATABASE_USERS.get(configured_role)
+    if expected_username is None:
+        raise RuntimeError(
+            "운영 런타임은 JOBNKILL_DATABASE_ROLE=web|collector|cleanup을 "
+            "명시해야 합니다."
+        )
+    if expected_role is not None and configured_role != expected_role:
+        raise RuntimeError(f"이 프로세스에는 {expected_role} 데이터베이스 역할이 필요합니다.")
+    if username != expected_username:
+        raise RuntimeError(
+            f"{configured_role} 런타임은 {expected_username} PostgreSQL URL을 사용해야 합니다."
+        )
+    return database_url
+
+
+def validate_production_database_target(
+    target: DatabaseTarget | None, *, expected_role: str | None = None,
+) -> str:
+    """Validate that production runtime credentials match its declared role."""
+    return _validate_production_database_target(target, expected_role=expected_role)
+
+
+def _validate_production_admin_database_target(
+    target: DatabaseTarget | None,
+) -> str:
+    return _validate_production_database_target(target, administrator=True)
+
+
+def _resolve_database_target(
+    target: DatabaseTarget | None = None, *, administrator: bool = False,
+) -> DatabaseTarget:
+    from_environment = target is None
+    if target is None:
+        if _production_environment():
+            # Never inherit a provider's ambient owner DATABASE_URL in production.
+            configured = os.getenv("JOBNKILL_DATABASE_URL", "").strip()
+        else:
+            configured = os.getenv(
+                "JOBNKILL_DATABASE_URL", os.getenv("DATABASE_URL", "")
+            ).strip()
+        resolved: DatabaseTarget = configured or database_path()
+    else:
+        resolved = target
+
+    if _production_environment():
+        return (
+            _validate_production_admin_database_target(resolved)
+            if administrator
+            else validate_production_database_target(resolved)
+        )
+    if (
+        from_environment
+        and isinstance(resolved, str)
+        and not resolved.startswith(("postgresql://", "postgres://"))
+    ):
+        raise ValueError("DATABASE_URL은 PostgreSQL URL이어야 합니다.")
+    return resolved
+
+
 def database_target(target: DatabaseTarget | None = None) -> DatabaseTarget:
-    """Resolve a DB target without exposing credentials in normal output."""
-    if target is not None:
-        return target
-    configured = os.getenv("JOBNKILL_DATABASE_URL", os.getenv("DATABASE_URL", "")).strip()
+    """Resolve a normal runtime DB target without allowing admin credentials."""
+    return _resolve_database_target(target)
+
+
+def _admin_database_target(target: DatabaseTarget | None = None) -> DatabaseTarget:
+    return _resolve_database_target(target, administrator=True)
+
+
+def automatic_migrations_enabled() -> bool:
+    """Return whether normal runtime startup may change the database schema.
+
+    Development keeps the convenient historical auto-initialize behavior.  A
+    production process is read/write runtime code, not a schema administrator,
+    so an unset switch is deliberately treated as disabled there.  Operators
+    can also disable automatic migrations explicitly in any environment.
+    """
+    configured = os.getenv("JOBNKILL_AUTO_MIGRATE", "").strip()
+    production = os.getenv("JOBNKILL_ENV", "development").strip().lower() == "production"
+    if configured and configured not in AUTO_MIGRATE_VALUES:
+        raise RuntimeError("JOBNKILL_AUTO_MIGRATE는 0 또는 1이어야 합니다.")
+    if production and configured == "1":
+        raise RuntimeError(
+            "운영 스키마 변경은 런타임 자동 마이그레이션이 아니라 "
+            "관리자 `python -m jobandkill init`으로 실행해야 합니다."
+        )
     if configured:
-        if not configured.startswith(("postgresql://", "postgres://")):
-            raise ValueError("DATABASE_URL은 PostgreSQL URL이어야 합니다.")
-        return configured
-    return database_path()
+        return configured == "1"
+    return not production
 
 
 def render_private_postgres_url(database_url: str) -> bool:
@@ -96,14 +220,17 @@ class Connection:
             self.close()
 
 
-def connect(target: DatabaseTarget | None = None) -> Connection:
-    resolved = database_target(target)
+def _connect(
+    target: DatabaseTarget | None = None, *, administrator: bool = False,
+) -> Connection:
+    resolved = (
+        _admin_database_target(target) if administrator else database_target(target)
+    )
     if isinstance(resolved, str) and resolved.startswith(("postgresql://", "postgres://")):
         sslmode = postgres_sslmode(resolved)
         if (
             os.getenv("JOBNKILL_ENV", "development").strip().lower() == "production"
             and sslmode not in POSTGRES_TLS_MODES
-            and not render_private_postgres_url(resolved)
         ):
             raise RuntimeError("운영 PostgreSQL은 sslmode=require 이상으로 암호화해야 합니다.")
         try:
@@ -126,6 +253,15 @@ def connect(target: DatabaseTarget | None = None) -> Connection:
     raw.execute("PRAGMA foreign_keys = ON")
     raw.execute("PRAGMA busy_timeout = 30000")
     return Connection(raw, "sqlite")
+
+
+def connect(target: DatabaseTarget | None = None) -> Connection:
+    """Connect with a runtime role; production owner credentials are rejected."""
+    return _connect(target)
+
+
+def _admin_connect(target: DatabaseTarget | None = None) -> Connection:
+    return _connect(target, administrator=True)
 
 
 def _sqlite_columns(connection: Connection, table: str) -> set[str]:
@@ -158,6 +294,28 @@ def _migrate_sqlite(connection: Connection) -> None:
         "CREATE INDEX IF NOT EXISTS document_objects_owner_idx "
         "ON document_objects(upload_attachment_id, state)"
     )
+    consent_columns = _sqlite_columns(connection, "user_consents")
+    for name, definition in (
+        ("notice_url", "TEXT NOT NULL DEFAULT ''"),
+        ("notice_sha256", "TEXT NOT NULL DEFAULT ''"),
+        ("request_token_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("verified_at", "TEXT"),
+    ):
+        if name not in consent_columns:
+            connection.execute(f"ALTER TABLE user_consents ADD COLUMN {name} {definition}")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS user_consents_request_idx "
+        "ON user_consents(request_token_hash)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS user_consents_pending_idx "
+        "ON user_consents(verified_at, accepted_at)"
+    )
+    token_columns = _sqlite_columns(connection, "login_tokens")
+    if "intent_hash" not in token_columns:
+        connection.execute(
+            "ALTER TABLE login_tokens ADD COLUMN intent_hash TEXT NOT NULL DEFAULT ''"
+        )
     connection.execute(
         "DELETE FROM job_profiles WHERE attachment_id IS NULL AND extraction_status<>'metadata'"
     )
@@ -220,6 +378,46 @@ def _migrate_postgres(connection: Connection) -> None:
         "CREATE INDEX IF NOT EXISTS document_objects_owner_idx "
         "ON document_objects(upload_attachment_id, state)"
     )
+    consent_columns = {
+        str(row["column_name"])
+        for row in connection.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema=current_schema() AND table_name='user_consents'
+            """
+        ).fetchall()
+    }
+    for name, definition in (
+        ("notice_url", "TEXT NOT NULL DEFAULT ''"),
+        ("notice_sha256", "TEXT NOT NULL DEFAULT ''"),
+        ("request_token_hash", "TEXT NOT NULL DEFAULT ''"),
+        ("verified_at", "TIMESTAMPTZ"),
+    ):
+        if name not in consent_columns:
+            connection.execute(
+                f"ALTER TABLE user_consents ADD COLUMN IF NOT EXISTS {name} {definition}"
+            )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS user_consents_request_idx "
+        "ON user_consents(request_token_hash)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS user_consents_pending_idx "
+        "ON user_consents(verified_at, accepted_at)"
+    )
+    token_columns = {
+        str(row["column_name"])
+        for row in connection.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema=current_schema() AND table_name='login_tokens'
+            """
+        ).fetchall()
+    }
+    if "intent_hash" not in token_columns:
+        connection.execute(
+            "ALTER TABLE login_tokens ADD COLUMN IF NOT EXISTS intent_hash TEXT NOT NULL DEFAULT ''"
+        )
     connection.execute(
         "DELETE FROM job_profiles WHERE attachment_id IS NULL AND extraction_status<>'metadata'"
     )
@@ -234,13 +432,71 @@ def _migrate_postgres(connection: Connection) -> None:
     )
 
 
-def initialize(target: DatabaseTarget | None = None) -> DatabaseTarget:
-    resolved = database_target(target)
+def _schema_metadata_table(connection: Connection) -> str:
+    return "public.app_metadata" if connection.dialect == "postgres" else "app_metadata"
+
+
+def _record_current_schema(connection: Connection) -> None:
+    table = _schema_metadata_table(connection)
+    connection.execute(
+        f"""
+        INSERT INTO {table}(key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+          value=excluded.value, updated_at=CURRENT_TIMESTAMP
+        """,
+        (SCHEMA_VERSION_KEY, str(CURRENT_SCHEMA_VERSION)),
+    )
+
+
+def _require_current_schema(connection: Connection) -> None:
+    """Validate the owner-written marker using only a restricted SELECT."""
+    table = _schema_metadata_table(connection)
+    try:
+        row = connection.execute(
+            f"SELECT value FROM {table} WHERE key=?", (SCHEMA_VERSION_KEY,),
+        ).fetchone()
+    except Exception:
+        raise RuntimeError(
+            "데이터베이스 스키마가 초기화되지 않았습니다. 관리자 init을 먼저 실행하세요."
+        ) from None
+    if not row:
+        raise RuntimeError(
+            "데이터베이스 스키마 버전 정보가 없습니다. 관리자 init을 먼저 실행하세요."
+        )
+    if str(row["value"]) != str(CURRENT_SCHEMA_VERSION):
+        raise RuntimeError(
+            "데이터베이스 스키마 버전이 애플리케이션과 다릅니다. 관리자 init이 필요합니다."
+        )
+
+
+def initialize(
+    target: DatabaseTarget | None = None, *, force_migrate: bool = False,
+) -> DatabaseTarget:
+    """Resolve and validate a database, applying schema only when authorized.
+
+    Runtime callers use the environment-controlled policy.  The explicit
+    ``force_migrate`` capability is reserved for the ``init`` administration
+    command so production service roles never need table ownership or DDL.
+    """
+    resolved = (
+        _admin_database_target(target) if force_migrate else database_target(target)
+    )
+    if not force_migrate and not automatic_migrations_enabled():
+        # Runtime validation is a single read from owner-maintained metadata;
+        # it requires neither information_schema access nor any DDL privilege.
+        with connect(resolved) as connection:
+            _require_current_schema(connection)
+        return resolved
     is_postgres = isinstance(resolved, str) and resolved.startswith(("postgresql://", "postgres://"))
     schema_name = "schema.postgres.sql" if is_postgres else "schema.sql"
     schema = (Path(__file__).parent / schema_name).read_text(encoding="utf-8")
-    with connect(resolved) as connection:
+    connection_context = (
+        _admin_connect(resolved) if force_migrate else connect(resolved)
+    )
+    with connection_context as connection:
         if connection.dialect == "postgres":
+            connection.execute("SET LOCAL search_path TO public, pg_catalog")
             connection.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended('jobandkill:schema-migration', 0))"
             )
@@ -250,9 +506,10 @@ def initialize(target: DatabaseTarget | None = None) -> DatabaseTarget:
         connection.executescript(schema)
         if connection.dialect == "sqlite":
             _migrate_sqlite(connection)
-            connection.execute("PRAGMA user_version = 7")
+            connection.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
         else:
             _migrate_postgres(connection)
+        _record_current_schema(connection)
     return resolved
 
 
@@ -336,7 +593,9 @@ def search_profiles(
     query = " ".join(query.split())[:100]
     institution = " ".join(institution.split())[:100]
     limit = min(max(limit, 1), 50)
-    offset = max(offset, 0)
+    offset = min(max(offset, 0), 1_000)
+    if connection.dialect == "postgres":
+        connection.execute("SET LOCAL statement_timeout = '2000ms'")
     like = "ILIKE" if connection.dialect == "postgres" else "LIKE"
     cast = "::text" if connection.dialect == "postgres" else ""
     terms: list[str] = []
@@ -347,8 +606,7 @@ def search_profiles(
     where = " AND ".join(terms) if terms else "1 = 1"
     select = """
         SELECT jp.id, jp.institution_name, jp.job_title, jp.ncs_code, jp.ncs_path,
-               jp.summary, jp.duties_json, jp.knowledge_json, jp.skills_json,
-               jp.attitudes_json, jp.qualifications_json, jp.keywords_json,
+               jp.summary, jp.duties_json, jp.skills_json,
                jp.extraction_status, jp.rights_status, p.application_end,
                p.original_url, p.ncs_categories_json, p.positions_json, p.regions_json
         FROM job_profiles jp
@@ -401,7 +659,13 @@ def search_profiles(
             select + f"WHERE {where} AND {visible} AND jp.extraction_status != 'rejected' " + order,
             params + [limit, offset],
         ).fetchall()
-    return [_profile_payload(row) for row in rows]
+    results = [_profile_payload(row) for row in rows]
+    for result in results:
+        result["duties"] = result.get("duties", [])[:3]
+        result["skills"] = result.get("skills", [])[:3]
+        for key in ("ncs_categories", "positions", "regions"):
+            result[key] = result.get(key, [])[:10]
+    return results
 
 
 def get_profile(connection: Connection, profile_id: int) -> dict[str, Any] | None:

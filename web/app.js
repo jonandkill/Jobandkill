@@ -1,10 +1,17 @@
 "use strict";
 
-const STORAGE_KEY = "jobandkill-draft-v1";
-const STEP_KEY = "jobandkill-step-v1";
-const CLIENT_KEY = "jobandkill-client-key-v1";
+const LEGACY_STORAGE_KEY = "jobandkill-draft-v1";
+const LEGACY_STEP_KEY = "jobandkill-step-v1";
+const SESSION_DRAFT_KEY = "jobandkill-session-draft-v2";
+const REMEMBERED_DRAFT_KEY = "jobandkill-remembered-draft-v2";
+const CLIENT_KEY = "jobandkill-client-key-v2";
+const ACTIVE_ACCOUNT_KEY = "jobandkill-active-account-v1";
+const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const ACCOUNT_DELETE_CONFIRMATION = "DELETE MY ACCOUNT";
+const RESIDENT_ID_PATTERN = /(?<!\p{Decimal_Number})\p{Decimal_Number}{6}\s*-?\s*[1-8]\p{Decimal_Number}{6}(?!\p{Decimal_Number})/u;
 const FIELDS = [
   "document_type", "style", "target_length", "institution", "target_job", "ncs_path",
+  "reference_catalog_id", "reference_source_url", "reference_name", "reference_version",
   "matched_duty", "matched_skill", "experience_title", "organization", "period_start",
   "period_end", "role", "situation", "objective", "judgment", "actions", "tools",
   "collaboration", "result", "evidence", "contribution", "learning", "facts_confirmed"
@@ -12,14 +19,26 @@ const FIELDS = [
 const defaults = {
   document_type: "career", style: "bullet", target_length: 800, institution: "", target_job: "",
   ncs_path: "", matched_duty: "", matched_skill: "", experience_title: "", organization: "",
+  reference_catalog_id: "", reference_source_url: "", reference_name: "", reference_version: "",
   period_start: "", period_end: "", role: "", situation: "", objective: "", judgment: "",
   actions: [""], tools: [], collaboration: "", result: "", evidence: "", contribution: "",
   learning: "", facts_confirmed: false
 };
 
-let state = loadState();
-let currentStep = Math.min(Math.max(Number(localStorage.getItem(STEP_KEY) || 0), 0), 7);
+let sessionStorageAvailable = true;
+let persistentStorageAvailable = true;
+let rememberDraft = false;
+removeLegacyDraftStorage();
+const restoredDraft = loadBrowserDraft();
+let state = restoredDraft.state;
+let currentStep = restoredDraft.currentStep;
+rememberDraft = restoredDraft.remember;
 let authState = { status: "loading", user: null };
+let privacyConfig = {
+  privacy_policy: { required: false, url: "", version: "" },
+  overseas_transfer: { required: false, url: "", version: "" }
+};
+let privacyConfigReady = false;
 let syncState = {
   consent: false, draftId: null, revision: null, pendingServer: null, pendingMode: null,
   clientKey: getClientKey(), timer: null, saving: false, dirty: false
@@ -28,20 +47,140 @@ let syncState = {
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
-function loadState() {
+function emptyDraft() {
+  return { ...defaults, actions: [""], tools: [] };
+}
+
+function storageError(kind) {
+  if (kind === "local") {
+    persistentStorageAvailable = false;
+    rememberDraft = false;
+  } else {
+    sessionStorageAvailable = false;
+  }
+  const autosave = document.getElementById("autosave-state");
+  if (autosave) {
+    autosave.textContent = sessionStorageAvailable
+      ? "30일 보관을 사용할 수 없습니다 · 이 탭에만 유지됩니다"
+      : "자동 저장을 사용할 수 없습니다 · 페이지를 닫기 전에 복사하세요";
+  }
+  const control = document.getElementById("remember-draft");
+  if (!persistentStorageAvailable && control) {
+    control.checked = false;
+    control.disabled = true;
+  }
+  const status = document.getElementById("draft-storage-status");
+  if (status) status.textContent = sessionStorageAvailable
+    ? "이 브라우저에서는 30일 보관을 사용할 수 없습니다. 이 탭을 닫으면 초안이 지워집니다."
+    : "이 브라우저에서는 자동 저장을 사용할 수 없습니다. 페이지를 닫기 전에 초안을 복사해 두세요.";
+}
+
+function storageGet(kind, key) {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    return cleanDraft(saved);
+    return (kind === "local" ? localStorage : sessionStorage).getItem(key);
   } catch {
-    return { ...defaults, actions: [""], tools: [] };
+    storageError(kind);
+    return null;
   }
 }
 
+function storageSet(kind, key, value) {
+  try {
+    (kind === "local" ? localStorage : sessionStorage).setItem(key, value);
+    return true;
+  } catch {
+    storageError(kind);
+    return false;
+  }
+}
+
+function storageRemove(kind, key) {
+  try {
+    (kind === "local" ? localStorage : sessionStorage).removeItem(key);
+    return true;
+  } catch {
+    storageError(kind);
+    return false;
+  }
+}
+
+function removeLegacyDraftStorage() {
+  for (const key of [LEGACY_STORAGE_KEY, LEGACY_STEP_KEY]) {
+    storageRemove("local", key);
+    storageRemove("session", key);
+  }
+}
+
+function readDraftRecord(store, key, requiresExpiry = false) {
+  try {
+    const kind = store === localStorage ? "local" : "session";
+    const record = JSON.parse(storageGet(kind, key) || "null");
+    if (!record || record.version !== 2 || !record.payload) return null;
+    if (requiresExpiry && (!Number.isFinite(record.expiresAt) || record.expiresAt <= Date.now())) {
+      storageRemove(kind, key);
+      return null;
+    }
+    return {
+      state: cleanDraft(record.payload),
+      currentStep: Math.min(Math.max(Number(record.currentStep || 0), 0), 7)
+    };
+  } catch {
+    storageRemove(store === localStorage ? "local" : "session", key);
+    return null;
+  }
+}
+
+function loadBrowserDraft() {
+  const remembered = readDraftRecord(localStorage, REMEMBERED_DRAFT_KEY, true);
+  const temporary = readDraftRecord(sessionStorage, SESSION_DRAFT_KEY);
+  return { ...(temporary || remembered || { state: emptyDraft(), currentStep: 0 }), remember: Boolean(remembered) };
+}
+
+function draftContainsResidentId(draft = state) {
+  // A validated SHA-256 catalogue ID can coincidentally contain 13 digits.
+  const serialized = JSON.stringify(draft, (key, value) => key === "reference_catalog_id" && typeof value === "string" && value.length === 64 && /^[a-f0-9]{64}$/u.test(value) ? "" : value);
+  return RESIDENT_ID_PATTERN.test(serialized.normalize("NFKC"));
+}
+
+function saveBrowserDraft() {
+  if (draftContainsResidentId()) {
+    storageRemove("session", SESSION_DRAFT_KEY);
+    storageRemove("local", REMEMBERED_DRAFT_KEY);
+    const status = document.getElementById("draft-storage-status");
+    if (status) status.textContent = "주민등록번호 형식이 감지되어 브라우저나 계정에 저장하지 않았습니다. 해당 번호를 지워 주세요.";
+    return false;
+  }
+  const accountId = authState?.status === "signed_in" ? String(authState.user?.id || "") : "";
+  const record = { version: 2, payload: state, currentStep, accountId };
+  storageSet("session", SESSION_DRAFT_KEY, JSON.stringify(record));
+  if (rememberDraft) {
+    storageSet("local", REMEMBERED_DRAFT_KEY, JSON.stringify({
+      ...record, expiresAt: Date.now() + DRAFT_TTL_MS
+    }));
+    if (accountId) storageSet("local", ACTIVE_ACCOUNT_KEY, accountId);
+  } else {
+    storageRemove("local", REMEMBERED_DRAFT_KEY);
+    storageRemove("local", ACTIVE_ACCOUNT_KEY);
+  }
+  return true;
+}
+
+function browserAutosaveStatus() {
+  if (!sessionStorageAvailable) return "자동 저장을 사용할 수 없습니다 · 페이지를 닫기 전에 복사하세요";
+  if (!persistentStorageAvailable) return "이 탭에만 자동 저장 · 30일 보관을 사용할 수 없습니다";
+  return "이 탭에 자동 저장";
+}
+
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  localStorage.setItem(STEP_KEY, String(currentStep));
+  if (!saveBrowserDraft()) {
+    const label = $("#autosave-state");
+    label.textContent = "민감 식별정보를 지운 뒤 저장할 수 있습니다";
+    return;
+  }
   const label = $("#autosave-state");
-  label.textContent = authState.status === "signed_in" && syncState.consent ? "계정 저장 대기 중…" : "이 브라우저에 자동 저장";
+  label.textContent = authState.status === "signed_in" && syncState.consent && sessionStorageAvailable
+    ? "계정 저장 대기 중…"
+    : browserAutosaveStatus();
   scheduleServerSave();
 }
 
@@ -68,10 +207,10 @@ function cleanDraft(saved) {
 }
 
 function getClientKey() {
-  let value = localStorage.getItem(CLIENT_KEY);
+  let value = storageGet("session", CLIENT_KEY);
   if (!value) {
     value = self.crypto?.randomUUID?.() || `draft_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    localStorage.setItem(CLIENT_KEY, value);
+    storageSet("session", CLIENT_KEY, value);
   }
   return value;
 }
@@ -107,6 +246,49 @@ async function api(path, options = {}) {
   return data;
 }
 
+function renderPrivacyConfig() {
+  const policy = privacyConfig.privacy_policy || {};
+  const overseas = privacyConfig.overseas_transfer || {};
+  const policyCheckbox = $("#privacy-policy-accepted");
+  const policyLink = $("#privacy-policy-link");
+  const policyVersion = $("#privacy-policy-version");
+  policyCheckbox.required = policy.required === true;
+  policyLink.textContent = policy.version ? `개인정보 처리방침 안내 (${policy.version})` : "개인정보 처리방침 안내";
+  if (policy.url) policyLink.href = policy.url;
+  else policyLink.removeAttribute("href");
+  policyVersion.textContent = policy.version
+    ? `적용 버전: ${policy.version}`
+    : "현재 환경의 안내 버전은 로그인 요청에 사용되지 않습니다.";
+
+  const showOverseas = overseas.required === true;
+  $("#overseas-transfer-consent").hidden = !showOverseas;
+  $("#overseas-transfer-version").hidden = !showOverseas;
+  $("#overseas-transfer-accepted").required = showOverseas;
+  if (showOverseas) {
+    const overseasLink = $("#overseas-transfer-link");
+    overseasLink.textContent = `국외 이전 안내 (${overseas.version})`;
+    overseasLink.href = overseas.url;
+    $("#overseas-transfer-version").textContent = `적용 버전: ${overseas.version}`;
+  }
+  $("#privacy-consent-copy").textContent = policy.required
+    ? "로그인 링크를 요청하려면 개인정보 처리방침을 확인하고 동의해 주세요."
+    : "로그인 전 개인정보 처리방침 안내를 확인할 수 있습니다.";
+}
+
+async function loadPrivacyConfig() {
+  const button = $("#request-login");
+  button.disabled = true;
+  try {
+    privacyConfig = await api("/api/privacy-config");
+    renderPrivacyConfig();
+    privacyConfigReady = true;
+    button.disabled = false;
+  } catch {
+    $("#privacy-consent-copy").textContent = "로그인 안내를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
+    $("#privacy-policy-version").textContent = "안내를 확인할 수 없어 로그인 요청이 비활성화되었습니다.";
+  }
+}
+
 function updateAuthUI() {
   const signedIn = authState.status === "signed_in";
   $("#open-auth").textContent = signedIn ? "내 계정" : "로그인";
@@ -116,7 +298,7 @@ function updateAuthUI() {
   $("#privacy-copy").textContent = signedIn && syncState.consent
     ? "작성 내용은 동의 후 계정에도 저장되며, 확인하지 않은 정보는 만들지 않습니다."
     : "작성 내용은 이 브라우저에 임시 저장되며, 확인하지 않은 정보는 만들지 않습니다.";
-  if (!signedIn) $("#autosave-state").textContent = "이 브라우저에 자동 저장";
+  if (!signedIn) $("#autosave-state").textContent = browserAutosaveStatus();
 }
 
 function showSyncNotice(mode, serverDraft = null, draftsMatch = false) {
@@ -154,9 +336,8 @@ function hydrateFromServer(serverDraft) {
   syncState.revision = serverDraft.revision;
   syncState.clientKey = serverDraft.client_key;
   syncState.consent = true;
-  localStorage.setItem(CLIENT_KEY, serverDraft.client_key);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  localStorage.setItem(STEP_KEY, String(currentStep));
+  storageSet("session", CLIENT_KEY, serverDraft.client_key);
+  saveBrowserDraft();
   hideSyncNotice();
   updateSelectedJob();
   if (!$("#workspace").hidden) renderStep();
@@ -198,13 +379,35 @@ async function reconcileDrafts() {
 async function loadAuth() {
   try {
     const data = await api("/api/me");
-    authState = data.authenticated ? { status: "signed_in", user: data.user } : { status: "signed_out", user: null };
+    if (data.authenticated) {
+      applyAuthState({ status: "signed_in", user: data.user });
+    } else {
+      authState = { status: "signed_out", user: null };
+      syncState.consent = false;
+    }
     updateAuthUI();
     if (data.authenticated) await reconcileDrafts();
   } catch {
-    authState = { status: "signed_out", user: null };
+    authState = { status: "unknown", user: null };
+    syncState.consent = false;
     updateAuthUI();
+    $("#auth-status").textContent = "계정 연결을 확인하지 못했습니다. 브라우저 초안은 그대로 보존했습니다.";
   }
+}
+
+function applyAuthState(nextState) {
+  const previousAccount = storageGet("session", ACTIVE_ACCOUNT_KEY)
+    || storageGet("local", ACTIVE_ACCOUNT_KEY);
+  const nextAccount = String(nextState.user?.id || nextState.user?.email || "");
+  if (previousAccount && previousAccount !== nextAccount) clearBrowserDraft();
+  if (nextAccount) {
+    storageSet("session", ACTIVE_ACCOUNT_KEY, nextAccount);
+    if (rememberDraft) storageSet("local", ACTIVE_ACCOUNT_KEY, nextAccount);
+  } else {
+    storageRemove("session", ACTIVE_ACCOUNT_KEY);
+    storageRemove("local", ACTIVE_ACCOUNT_KEY);
+  }
+  authState = nextState;
 }
 
 function scheduleServerSave() {
@@ -216,6 +419,10 @@ function scheduleServerSave() {
 
 async function saveServerDraft() {
   if (authState.status !== "signed_in" || !syncState.consent) return;
+  if (draftContainsResidentId()) {
+    $("#autosave-state").textContent = "주민등록번호를 지운 뒤 계정에 저장할 수 있습니다";
+    return;
+  }
   if (syncState.saving) {
     syncState.dirty = true;
     return;
@@ -241,7 +448,12 @@ async function saveServerDraft() {
       authState = { status: "signed_out", user: null };
       syncState.consent = false;
       updateAuthUI();
-      $("#autosave-state").textContent = "로그인 만료 · 브라우저에는 저장됨";
+      $("#autosave-state").textContent = "로그인 만료 · 브라우저 초안은 보존됨";
+    } else if (error.code === "consent_refresh_required") {
+      syncState.consent = false;
+      hideSyncNotice();
+      $("#autosave-state").textContent = "개인정보 안내 재확인 필요 · 브라우저에만 저장됨";
+      $("#account-status").textContent = error.message;
     } else if (error.status === 409) {
       syncState.consent = false;
       $("#autosave-state").textContent = "저장 내용 선택 필요";
@@ -291,7 +503,7 @@ async function consumeLoginToken() {
   $("#auth-status").textContent = "로그인 링크를 확인하고 있습니다…";
   try {
     const data = await api("/api/auth/verify", { method: "POST", body: JSON.stringify({ token }) });
-    authState = { status: "signed_in", user: data.user };
+    applyAuthState({ status: "signed_in", user: data.user });
     $("#auth-status").textContent = "로그인되었습니다.";
     updateAuthUI();
   } catch (error) {
@@ -302,13 +514,23 @@ async function consumeLoginToken() {
 
 async function requestLogin(event) {
   event.preventDefault();
+  if (!privacyConfigReady) {
+    $("#auth-status").textContent = "로그인 안내를 확인한 뒤 다시 시도해 주세요.";
+    return;
+  }
   const button = $("#request-login");
   button.disabled = true;
   $("#auth-status").textContent = "로그인 링크를 보내고 있습니다…";
   $("#development-login-link").hidden = true;
   try {
     const data = await api("/api/auth/request", {
-      method: "POST", body: JSON.stringify({ email: $("#login-email").value })
+      method: "POST", body: JSON.stringify({
+        email: $("#login-email").value,
+        privacy_policy_accepted: $("#privacy-policy-accepted").checked,
+        privacy_policy_version: privacyConfig.privacy_policy?.version || "",
+        overseas_transfer_accepted: $("#overseas-transfer-accepted").checked,
+        overseas_transfer_version: privacyConfig.overseas_transfer?.version || ""
+      })
     });
     $("#auth-status").textContent = data.message;
     if (data.development_magic_link) {
@@ -329,14 +551,7 @@ async function logout() {
     $("#account-status").textContent = error.message;
     return;
   }
-  if ($("#clear-local-on-logout").checked) {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(STEP_KEY);
-    state = { ...defaults, actions: [""], tools: [] };
-    currentStep = 0;
-    updateSelectedJob();
-    if (!$("#workspace").hidden) renderStep();
-  }
+  clearBrowserDraft();
   authState = { status: "signed_out", user: null };
   syncState = {
     consent: false, draftId: null, revision: null, pendingServer: null, pendingMode: null,
@@ -344,6 +559,99 @@ async function logout() {
   };
   updateAuthUI();
   $("#auth-status").textContent = "로그아웃되었습니다.";
+}
+
+function clearBrowserDraft({ preserveActiveAccount = false } = {}) {
+  for (const key of [SESSION_DRAFT_KEY, CLIENT_KEY]) {
+    storageRemove("local", key);
+    storageRemove("session", key);
+  }
+  if (!preserveActiveAccount) {
+    storageRemove("local", ACTIVE_ACCOUNT_KEY);
+    storageRemove("session", ACTIVE_ACCOUNT_KEY);
+  }
+  storageRemove("local", REMEMBERED_DRAFT_KEY);
+  removeLegacyDraftStorage();
+  rememberDraft = false;
+  const control = $("#remember-draft");
+  if (control) control.checked = false;
+  state = emptyDraft();
+  currentStep = 0;
+  updateSelectedJob();
+  if (!$("#workspace").hidden) renderStep();
+}
+
+async function exportAccount() {
+  const button = $("#export-account");
+  button.disabled = true;
+  $("#account-status").textContent = "데이터를 준비하고 있습니다…";
+  try {
+    const data = await api("/api/user/export", { method: "POST", body: "{}", csrf: true });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "jobandkill-account-export.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    $("#account-status").textContent = "내 데이터 파일을 내려받았습니다.";
+  } catch (error) {
+    $("#account-status").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteAllAccountDrafts() {
+  if (!window.confirm("계정의 모든 초안을 운영 DB에서 삭제할까요? 계정은 유지되며, 백업 사본은 정해진 보존기간 뒤 제거됩니다.")) return;
+  const button = $("#delete-all-drafts");
+  button.disabled = true;
+  $("#account-status").textContent = "저장 초안을 삭제하고 있습니다…";
+  try {
+    const result = await api("/api/user/drafts", { method: "DELETE", csrf: true });
+    clearBrowserDraft({ preserveActiveAccount: true });
+    syncState = {
+      consent: false, draftId: null, revision: null, pendingServer: null, pendingMode: null,
+      clientKey: getClientKey(), timer: null, saving: false, dirty: false
+    };
+    $("#account-status").textContent = `저장 초안 ${Number(result.count || 0).toLocaleString("ko-KR")}개를 삭제했습니다.`;
+    updateAuthUI();
+  } catch (error) {
+    $("#account-status").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteAccount() {
+  const confirmation = window.prompt(
+    `운영 DB의 계정과 저장 초안을 삭제합니다. 백업은 정해진 보존기간 뒤 제거되고, 다른 기기의 브라우저 초안은 별도 삭제해야 합니다. 계속하려면 ${ACCOUNT_DELETE_CONFIRMATION}를 입력하세요.`
+  );
+  if (confirmation !== ACCOUNT_DELETE_CONFIRMATION) {
+    $("#account-status").textContent = "계정 삭제를 취소했습니다. 확인 문구가 일치해야 합니다.";
+    return;
+  }
+  const button = $("#delete-account");
+  button.disabled = true;
+  $("#account-status").textContent = "계정을 삭제하고 있습니다…";
+  try {
+    await api("/api/user/delete-account", {
+      method: "POST", body: JSON.stringify({ confirmation }), csrf: true
+    });
+  } catch (error) {
+    $("#account-status").textContent = error.message;
+    button.disabled = false;
+    return;
+  }
+  clearBrowserDraft();
+  authState = { status: "signed_out", user: null };
+  syncState = {
+    consent: false, draftId: null, revision: null, pendingServer: null, pendingMode: null,
+    clientKey: getClientKey(), timer: null, saving: false, dirty: false
+  };
+  updateAuthUI();
+  $("#auth-status").textContent = "계정과 저장된 초안을 삭제했습니다.";
+  closeDialog("auth-dialog");
 }
 
 async function resetDraft() {
@@ -357,14 +665,9 @@ async function resetDraft() {
       return;
     }
   }
-  state = { ...defaults, actions: [""], tools: [] };
-  localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(STEP_KEY);
-  currentStep = 0;
+  clearBrowserDraft({ preserveActiveAccount: authState.status === "signed_in" });
   syncState.draftId = null;
   syncState.revision = null;
-  updateSelectedJob();
-  renderStep();
 }
 
 const stepDefinitions = [
@@ -428,11 +731,11 @@ function renderTarget(container) {
     <p class="step-intro">공식 직무를 선택하면 해당 공고의 업무·기술을 연결합니다. 검색 결과가 없어도 직접 입력할 수 있습니다.</p>
     <div class="target-preview">${selectedText}<button type="button" data-open-job-search>직무 아카이브 열기</button></div>
     <div class="form-grid">
-      <div class="field"><label for="institution">지원 기관</label><input id="institution" name="institution" value="${escapeMarkup(state.institution)}" placeholder="예: 한국○○공사"></div>
-      <div class="field"><label for="target_job">지원 직무</label><input id="target_job" name="target_job" value="${escapeMarkup(state.target_job)}" placeholder="예: 사무행정"></div>
-      <div class="field field-full"><label for="ncs_path">NCS 분류 또는 채용분야</label><input id="ncs_path" name="ncs_path" value="${escapeMarkup(state.ncs_path)}" placeholder="예: 경영·회계·사무 > 총무·인사 > 일반사무"></div>
-      <div class="field"><label for="matched_duty">연결할 직무수행내용</label><textarea id="matched_duty" name="matched_duty" placeholder="선택한 직무에서 가져오거나 직접 입력">${escapeMarkup(state.matched_duty)}</textarea></div>
-      <div class="field"><label for="matched_skill">연결할 필요기술</label><textarea id="matched_skill" name="matched_skill" placeholder="예: 자료 분석 및 문서 작성 능력">${escapeMarkup(state.matched_skill)}</textarea></div>
+      <div class="field"><label for="institution">지원 기관</label><input id="institution" name="institution" maxlength="300" value="${escapeMarkup(state.institution)}" placeholder="예: 한국○○공사"></div>
+      <div class="field"><label for="target_job">지원 직무</label><input id="target_job" name="target_job" maxlength="300" value="${escapeMarkup(state.target_job)}" placeholder="예: 사무행정"></div>
+      <div class="field field-full"><label for="ncs_path">NCS 분류 또는 채용분야</label><input id="ncs_path" name="ncs_path" maxlength="1000" value="${escapeMarkup(state.ncs_path)}" placeholder="예: 경영·회계·사무 > 총무·인사 > 일반사무"></div>
+      <div class="field"><label for="matched_duty">연결할 직무수행내용</label><textarea id="matched_duty" name="matched_duty" maxlength="1000" placeholder="선택한 직무에서 가져오거나 직접 입력">${escapeMarkup(state.matched_duty)}</textarea></div>
+      <div class="field"><label for="matched_skill">연결할 필요기술</label><textarea id="matched_skill" name="matched_skill" maxlength="1000" placeholder="예: 자료 분석 및 문서 작성 능력">${escapeMarkup(state.matched_skill)}</textarea></div>
     </div>`;
   $("[data-open-job-search]", container).addEventListener("click", openJobDialog);
 }
@@ -445,27 +748,28 @@ function renderBasics(container) {
       ${inputField("organization", "소속·활동기관", "예: ○○공단 체험형 인턴", state.organization)}
       ${inputField("period_start", "시작", "2025.03", state.period_start, false, "month")}
       ${inputField("period_end", "종료", "2025.08", state.period_end, false, "month")}
-      <div class="field field-full"><label for="role">내 역할과 책임 범위</label><textarea id="role" name="role" placeholder="직책보다 실제로 맡은 책임을 써주세요. 예: 민원 데이터 정리와 개선안 초안 작성">${escapeMarkup(state.role)}</textarea><small>‘팀원’ 대신 내가 책임진 대상과 범위를 적으면 더 정확해집니다.</small></div>
+      <div class="field field-full"><label for="role">내 역할과 책임 범위</label><textarea id="role" name="role" maxlength="500" placeholder="직책보다 실제로 맡은 책임을 써주세요. 예: 민원 데이터 정리와 개선안 초안 작성">${escapeMarkup(state.role)}</textarea><small>‘팀원’ 대신 내가 책임진 대상과 범위를 적으면 더 정확해집니다.</small></div>
     </div>`;
 }
 
 function inputField(name, label, placeholder, value, full = false, type = "text") {
-  return `<div class="field ${full ? "field-full" : ""}"><label for="${name}">${label}</label><input id="${name}" name="${name}" type="${type}" value="${escapeMarkup(value)}" placeholder="${placeholder}"></div>`;
+  const limit = type === "month" ? 30 : 300;
+  return `<div class="field ${full ? "field-full" : ""}"><label for="${name}">${label}</label><input id="${name}" name="${name}" type="${type}" maxlength="${limit}" value="${escapeMarkup(value)}" placeholder="${placeholder}"></div>`;
 }
 
 function renderSituation(container) {
   container.innerHTML = `
     <p class="step-intro">배경 설명은 짧게, 해결해야 했던 문제와 기준은 구체적으로 적어주세요.</p>
     <div class="form-grid">
-      <div class="field field-full"><label for="situation">상황·문제</label><textarea id="situation" name="situation" placeholder="언제, 무엇이 잘 되지 않았고, 누구에게 어떤 영향이 있었나요?">${escapeMarkup(state.situation)}</textarea><small>예: 접수 기준이 담당자마다 달라 같은 민원도 처리 시간이 달라지는 상황이었습니다.</small></div>
-      <div class="field field-full"><label for="objective">내가 세운 목표</label><textarea id="objective" name="objective" placeholder="무엇을 어느 수준까지 바꾸려고 했나요?">${escapeMarkup(state.objective)}</textarea><small>실제로 측정한 수치가 없다면 숫자를 새로 만들지 마세요.</small></div>
+      <div class="field field-full"><label for="situation">상황·문제</label><textarea id="situation" name="situation" maxlength="4000" placeholder="언제, 무엇이 잘 되지 않았고, 누구에게 어떤 영향이 있었나요?">${escapeMarkup(state.situation)}</textarea><small>예: 접수 기준이 담당자마다 달라 같은 민원도 처리 시간이 달라지는 상황이었습니다.</small></div>
+      <div class="field field-full"><label for="objective">내가 세운 목표</label><textarea id="objective" name="objective" maxlength="4000" placeholder="무엇을 어느 수준까지 바꾸려고 했나요?">${escapeMarkup(state.objective)}</textarea><small>실제로 측정한 수치가 없다면 숫자를 새로 만들지 마세요.</small></div>
     </div>`;
 }
 
 function renderAction(container) {
   container.innerHTML = `
     <p class="step-intro">먼저 왜 그런 선택을 했는지 적고, 실제 행동은 시간 순서대로 나눠주세요.</p>
-    <div class="field"><label for="judgment">판단 기준·이유</label><textarea id="judgment" name="judgment" placeholder="여러 방법 중 이 방법을 선택한 이유와 고려한 기준">${escapeMarkup(state.judgment)}</textarea></div>
+    <div class="field"><label for="judgment">판단 기준·이유</label><textarea id="judgment" name="judgment" maxlength="4000" placeholder="여러 방법 중 이 방법을 선택한 이유와 고려한 기준">${escapeMarkup(state.judgment)}</textarea></div>
     <div class="field field-spaced"><span class="field-label">구체적인 행동</span><span class="field-help">‘노력했다’보다 조사·분석·설계·협의처럼 확인 가능한 동사로 시작하세요.</span><div class="action-list" id="action-list"></div><button class="add-action" id="add-action" type="button">+ 행동 한 단계 추가</button></div>`;
   renderActionRows();
   $("#add-action").addEventListener("click", () => {
@@ -487,6 +791,7 @@ function renderActionRows() {
     marker.textContent = String(index + 1).padStart(2, "0");
     const input = document.createElement("input");
     input.value = action;
+    input.maxLength = 1000;
     input.placeholder = index === 0 ? "예: 최근 3개월의 민원 유형과 처리 시간을 분류" : "다음 행동";
     input.setAttribute("aria-label", `${index + 1}번째 행동`);
     input.addEventListener("input", event => {
@@ -513,8 +818,8 @@ function renderCollaboration(container) {
   container.innerHTML = `
     <p class="step-intro">도구 이름만 나열하지 말고, 누구와 어떤 정보를 주고받았는지 함께 정리합니다.</p>
     <div class="form-grid">
-      <div class="field field-full"><label for="tools">사용한 도구·기법</label><input id="tools" name="tools" value="${escapeMarkup(state.tools.join(", "))}" placeholder="예: Excel 피벗테이블, VOC 분류표, 주간 회의"><small>쉼표로 구분해 주세요.</small></div>
-      <div class="field field-full"><label for="collaboration">협업·의사소통 방식</label><textarea id="collaboration" name="collaboration" placeholder="누구와 무엇을 확인하고, 의견 차이를 어떻게 조정했나요?">${escapeMarkup(state.collaboration)}</textarea></div>
+      <div class="field field-full"><label for="tools">사용한 도구·기법</label><input id="tools" name="tools" maxlength="1000" value="${escapeMarkup(state.tools.join(", "))}" placeholder="예: Excel 피벗테이블, VOC 분류표, 주간 회의"><small>쉼표로 구분해 주세요.</small></div>
+      <div class="field field-full"><label for="collaboration">협업·의사소통 방식</label><textarea id="collaboration" name="collaboration" maxlength="4000" placeholder="누구와 무엇을 확인하고, 의견 차이를 어떻게 조정했나요?">${escapeMarkup(state.collaboration)}</textarea></div>
     </div>`;
 }
 
@@ -522,9 +827,9 @@ function renderOutcome(container) {
   container.innerHTML = `
     <p class="step-intro">팀 전체 성과, 확인 가능한 근거, 내가 직접 기여한 부분을 분리하면 과장 없이도 강해집니다.</p>
     <div class="form-grid">
-      <div class="field field-full"><label for="result">결과·변화</label><textarea id="result" name="result" placeholder="업무 시간, 오류, 이용자 반응, 산출물 등 실제로 달라진 점">${escapeMarkup(state.result)}</textarea></div>
-      <div class="field"><label for="evidence">결과를 확인한 근거</label><textarea id="evidence" name="evidence" placeholder="예: 월간 처리 통계, 담당자 검토 의견, 최종 보고서">${escapeMarkup(state.evidence)}</textarea></div>
-      <div class="field"><label for="contribution">내가 직접 기여한 범위</label><textarea id="contribution" name="contribution" placeholder="직접 작성·분석·제안·실행한 부분과 도움받은 부분">${escapeMarkup(state.contribution)}</textarea></div>
+      <div class="field field-full"><label for="result">결과·변화</label><textarea id="result" name="result" maxlength="4000" placeholder="업무 시간, 오류, 이용자 반응, 산출물 등 실제로 달라진 점">${escapeMarkup(state.result)}</textarea></div>
+      <div class="field"><label for="evidence">결과를 확인한 근거</label><textarea id="evidence" name="evidence" maxlength="4000" placeholder="예: 월간 처리 통계, 담당자 검토 의견, 최종 보고서">${escapeMarkup(state.evidence)}</textarea></div>
+      <div class="field"><label for="contribution">내가 직접 기여한 범위</label><textarea id="contribution" name="contribution" maxlength="4000" placeholder="직접 작성·분석·제안·실행한 부분과 도움받은 부분">${escapeMarkup(state.contribution)}</textarea></div>
     </div>`;
 }
 
@@ -537,7 +842,7 @@ function renderReview(container) {
   container.innerHTML = `
     <p class="step-intro">빠진 항목은 초안에서 [확인 필요]로 남습니다. 생성 후에도 돌아와 수정할 수 있습니다.</p>
     <ul class="review-list">${review.map(([label, value]) => `<li><span>${label}</span><b class="${value ? "" : "missing"}">${value ? "입력됨" : "확인 필요"}</b></li>`).join("")}</ul>
-    <div class="field field-review"><label for="learning">배운 점·다음 적용</label><textarea id="learning" name="learning" placeholder="이 경험 이후 달라진 업무 방식이나 지원 직무에서 적용할 점">${escapeMarkup(state.learning)}</textarea></div>
+    <div class="field field-review"><label for="learning">배운 점·다음 적용</label><textarea id="learning" name="learning" maxlength="4000" placeholder="이 경험 이후 달라진 업무 방식이나 지원 직무에서 적용할 점">${escapeMarkup(state.learning)}</textarea></div>
     <div class="fact-check"><input id="facts_confirmed" name="facts_confirmed" type="checkbox" ${state.facts_confirmed ? "checked" : ""}><label for="facts_confirmed">위 내용은 내가 실제로 수행한 경험입니다.<span>팀 성과를 내 개인 성과로 바꾸거나, 확인하지 않은 수치를 입력하지 않았습니다.</span></label></div>`;
 }
 
@@ -574,13 +879,22 @@ function updateSelectedJob() {
     tag.textContent = value.length > 35 ? `${value.slice(0, 35)}…` : value;
     tags.append(tag);
   });
+  if (state.reference_catalog_id) {
+    const reference = document.createElement("span");
+    reference.textContent = "NCS 공통 기준 참고 · 기관별 채용요건 아님";
+    tags.append(reference);
+  }
 }
 
 async function loadHealth() {
   try {
-    const response = await fetch("/api/health");
-    if (!response.ok) throw new Error();
-    const data = await response.json();
+    const [healthResponse, statsResponse] = await Promise.all([
+      fetch("/api/health"),
+      fetch("/api/stats")
+    ]);
+    if (!healthResponse.ok || !statsResponse.ok) throw new Error();
+    const [health, data] = await Promise.all([healthResponse.json(), statsResponse.json()]);
+    if (health.status !== "ok" || !data.stats) throw new Error();
     const stats = data.stats;
     $("#stat-institutions").textContent = Number(stats.institutions).toLocaleString("ko-KR");
     $("#stat-postings").textContent = Number(stats.postings).toLocaleString("ko-KR");
@@ -593,14 +907,272 @@ async function loadHealth() {
   }
 }
 
+let archiveScope = "catalog";
+let archiveRequest = 0;
+let catalogDetailRequest = 0;
+let catalogOffset = 0;
+let catalogQuery = "";
+const CATALOG_PAGE_SIZE = 20;
+
+function clearCatalogDetail() {
+  catalogDetailRequest += 1;
+  $("#catalog-detail").hidden = true;
+  $("#catalog-detail").replaceChildren();
+}
+
 async function openJobDialog() {
   const dialog = $("#job-dialog");
   dialog.showModal();
   $("#job-search").focus();
-  await searchJobs("");
+  loadCatalogCoverage();
+  await searchArchive($("#job-search").value);
+}
+
+function setArchiveScope(value) {
+  archiveScope = value === "jobs" ? "jobs" : "catalog";
+  const catalog = archiveScope === "catalog";
+  $("#archive-scope-note").textContent = catalog
+    ? "NCS는 직무 수행에 필요한 공통 기준이며, 특정 공공기관의 채용공고가 아닙니다."
+    : "기관별 채용공고와 첨부 직무기술서에서 수집한 직무입니다. NCS 공통 기준과는 구분됩니다.";
+  $("#catalog-coverage").hidden = !catalog;
+  $("#job-search-label").textContent = catalog ? "직무명이나 NCS 분류명을 입력하세요." : "기관명이나 직무명을 입력하세요.";
+  $("#job-search").placeholder = catalog ? "예: 사무행정, 전기, 능력단위" : "예: 사무행정, 한국산림복지진흥원";
+  searchArchive($("#job-search").value);
+}
+
+function searchArchive(query, offset = 0) {
+  clearCatalogDetail();
+  $("#catalog-pagination").hidden = true;
+  return archiveScope === "catalog" ? searchCatalog(query, offset) : searchJobs(query);
+}
+
+async function loadCatalogCoverage() {
+  const label = $("#catalog-coverage-message");
+  try {
+    const data = await api("/api/data-coverage");
+    const catalog = data.catalog || {};
+    const total = Number(catalog.catalog_records);
+    if (!Number.isFinite(total)) throw new Error();
+    const notes = Array.isArray(catalog.notes) ? catalog.notes.filter(note => typeof note === "string").slice(0, 3) : [];
+    label.textContent = [
+      `이 서비스에 저장된 직무능력 자료 ${total.toLocaleString("ko-KR")}건 · 정부 전체 자료의 총수가 아닙니다.`,
+      total === 0 ? "아직 수집된 자료가 없습니다. API 인증·이용권한·최초 수집 여부를 확인해야 합니다." : "필요 지식·기술·태도 등의 제공 범위는 자료별로 다릅니다.",
+      ...notes
+    ].join("\n");
+    renderSourceCoverage(data.sources, catalog.sources);
+  } catch {
+    label.textContent = "수집 상태를 확인하지 못했습니다. 정부에 자료가 없다는 의미는 아닙니다. 창을 다시 열면 재확인합니다.";
+    $("#catalog-source-state").hidden = true;
+  }
+}
+
+function renderSourceCoverage(sources, catalogSources = []) {
+  const list = $("#catalog-source-list");
+  list.replaceChildren();
+  const statusNames = {
+    adapter_ready: "수집기 준비 · 인증 및 실제 수집 확인 필요",
+    spec_verified: "명세 확인 · 수집기 연결 전", manual_import_ready: "파일 가져오기 준비",
+    not_connected: "아직 연결되지 않음", metadata_adapter_only: "메타데이터 연결만 준비"
+  };
+  const fieldNames = {
+    definition: "직무·능력단위 설명", performance_criteria: "수행준거", knowledge: "지식", skills: "기술", attitudes: "태도",
+    institution_specific_requirements: "기관별 채용 요건", structured_knowledge: "구조화된 지식",
+    structured_skills: "구조화된 기술", structured_attitudes: "구조화된 태도"
+  };
+  for (const source of Array.isArray(sources) ? sources : []) {
+    const row = document.createElement("article");
+    const title = document.createElement("strong");
+    title.textContent = source.name || "정보원 이름 미확인";
+    const status = document.createElement("p");
+    status.textContent = source.rights === "restricted" ? "이용권한 제한 · 상용 수집 제외"
+      : source.rights === "review_required" || source.rights === "document_review_required" ? "이용권한 검토 대기"
+      : statusNames[source.implementation] || "연결 상태 확인 필요";
+    const note = document.createElement("p");
+    note.textContent = source.note || "제공 범위 확인 필요";
+    row.append(title, status, note);
+    const stored = (Array.isArray(catalogSources) ? catalogSources : []).find(item => item.source_slug === source.slug);
+    if (stored) {
+      const count = document.createElement("p");
+      const runNames = { completed: "해당 수집 범위 완료", imported: "공개 파일 가져오기 완료", partial: "일부만 수집", failed: "최근 수집 실패", running: "수집 진행 중" };
+      const runStatus = stored.latest_run ? runNames[stored.latest_run.status] || "최근 수집 상태 확인 필요" : "아직 수집 실행 이력 없음";
+      count.textContent = `현재 저장 ${Number(stored.records || 0).toLocaleString("ko-KR")}건 · ${runStatus}`;
+      row.append(count);
+    }
+    if (Array.isArray(source.not_provided) && source.not_provided.length) {
+      const missing = document.createElement("p");
+      missing.textContent = `이 정보원에서 제공하지 않는 항목: ${source.not_provided.map(key => fieldNames[key] || "추가 항목").join(" · ")}`;
+      row.append(missing);
+    }
+    const href = safeSourceLink(source.url);
+    if (href) {
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "공식 제공 범위 확인 ↗";
+      row.append(link);
+    }
+    list.append(row);
+  }
+  $("#catalog-source-state").hidden = !list.children.length;
+}
+
+async function searchCatalog(query, offset = 0) {
+  const request = ++archiveRequest;
+  const stateLabel = $("#job-search-state");
+  const results = $("#job-results");
+  catalogQuery = String(query || "").trim();
+  catalogOffset = Math.max(0, offset);
+  results.replaceChildren();
+  stateLabel.textContent = "저장된 NCS 직무능력 자료를 검색하고 있습니다…";
+  try {
+    const data = await api(`/api/catalog?q=${encodeURIComponent(catalogQuery)}&limit=${CATALOG_PAGE_SIZE}&offset=${catalogOffset}`);
+    if (request !== archiveRequest) return;
+    if (!Array.isArray(data.items)) throw new Error();
+    if (!data.items.length) {
+      stateLabel.textContent = catalogQuery
+        ? "저장된 자료에서 일치하는 항목을 찾지 못했습니다. 다른 단어로 검색하거나 수집 상태를 확인해 주세요."
+        : "아직 수집된 NCS 직무능력 자료가 없습니다. 인증·권리 확인 및 최초 수집 후 표시됩니다.";
+    } else {
+      stateLabel.textContent = `${catalogOffset + 1}–${catalogOffset + data.items.length}번째 참고 자료입니다. 선택하면 출처와 제공 항목을 확인할 수 있습니다.`;
+      data.items.forEach(item => results.append(createCatalogResult(item)));
+    }
+    const total = Number(data.total);
+    const hasNext = Number.isFinite(total) ? catalogOffset + data.items.length < total : data.items.length === CATALOG_PAGE_SIZE;
+    $("#catalog-pagination").hidden = catalogOffset === 0 && !hasNext;
+    $("#catalog-previous").disabled = catalogOffset === 0;
+    $("#catalog-next").disabled = !hasNext;
+    $("#catalog-page").textContent = `${Math.floor(catalogOffset / CATALOG_PAGE_SIZE) + 1}쪽`;
+  } catch {
+    if (request !== archiveRequest) return;
+    stateLabel.textContent = "직무능력 자료를 불러오지 못했습니다. 다시 검색하거나 직접 입력으로 계속할 수 있습니다.";
+  }
+}
+
+function createCatalogResult(item) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "job-result";
+  const body = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = item.job_title || "이름 미제공";
+  const classification = document.createElement("small");
+  classification.textContent = item.ncs_path || "분류 정보 미제공";
+  const note = document.createElement("small");
+  note.textContent = "NCS 공통 직무능력 · 기관 채용공고 아님";
+  const arrow = document.createElement("span");
+  arrow.textContent = "→";
+  body.append(title, classification, note);
+  button.append(body, arrow);
+  button.addEventListener("click", () => showCatalogDetail(item.id));
+  return button;
+}
+
+function catalogDraftAdditions(item, draft) {
+  const candidates = { target_job: item.job_title, ncs_path: item.ncs_path, matched_duty: item.summary };
+  const limits = { target_job: 300, ncs_path: 1000, matched_duty: 1000 };
+  const additions = {};
+  for (const [field, value] of Object.entries(candidates)) {
+    if (!String(draft[field] || "").trim() && typeof value === "string" && value.trim() && [...value.trim()].length <= limits[field]) additions[field] = value.trim();
+  }
+  return additions;
+}
+
+function applyCatalogReference(item) {
+  const additions = catalogDraftAdditions(item, state);
+  const hasReference = ["reference_catalog_id", "reference_source_url", "reference_name", "reference_version"].some(field => state[field]);
+  if (hasReference && state.reference_catalog_id !== item.id) {
+    $("#catalog-apply-status").textContent = "이미 다른 NCS 자료를 참고한 초안입니다. 기존 참고 출처와 작성 내용을 유지했습니다. 여러 출처를 섞지 않도록 새 초안에서 적용해 주세요.";
+    return;
+  }
+  const reference = JobAndKillComposer.catalogReference(item);
+  if (Object.keys(additions).length && !reference) {
+    $("#catalog-apply-status").textContent = "공식 출처 기록을 확인하지 못해 적용하지 않았습니다. 기존 작성 내용은 그대로 유지됩니다.";
+    return;
+  }
+  Object.assign(state, additions);
+  if (Object.keys(additions).length) {
+    Object.assign(state, reference);
+    saveState();
+  }
+  updateSelectedJob();
+  closeDialog("job-dialog");
+  if ($("#workspace").hidden) showWorkspace();
+  else renderStep();
+  $("#form-message").textContent = Object.keys(additions).length
+    ? "NCS 참고 자료를 비어 있던 목표 직무·분류·업무 항목에만 적용했습니다. 지원 기관과 작성한 경험은 변경하지 않았습니다."
+    : "기존 입력은 유지했습니다. 자동 적용할 수 있는 빈 항목이 없어, 필요한 부분을 직접 입력해 주세요.";
+}
+
+function safeSourceLink(value) {
+  try {
+    const url = new URL(value);
+    return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+async function showCatalogDetail(id) {
+  const request = ++catalogDetailRequest;
+  const panel = $("#catalog-detail");
+  panel.hidden = false;
+  panel.textContent = "직무능력의 제공 항목과 출처를 확인하고 있습니다…";
+  panel.focus();
+  try {
+    const data = await api(`/api/catalog/${encodeURIComponent(String(id))}`);
+    if (request !== catalogDetailRequest) return;
+    const item = data.item;
+    if (!item || typeof item !== "object") throw new Error();
+    panel.replaceChildren();
+    const title = document.createElement("h3");
+    title.textContent = item.job_title || "이름 미제공";
+    const context = document.createElement("p");
+    context.textContent = `${item.ncs_path || "분류 정보 미제공"}\nNCS 공통 기준 · 특정 기관의 채용 조건이 아닙니다.`;
+    const fields = document.createElement("dl");
+    for (const [key, label] of [
+      ["summary", "직무·능력단위 설명"], ["knowledge", "필요 지식"], ["skills", "필요 기술"],
+      ["attitudes", "필요 태도"], ["performance_criteria", "수행준거"]
+    ]) {
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const description = document.createElement("dd");
+      const value = Array.isArray(item[key]) ? item[key].filter(part => typeof part === "string").join("\n") : item[key];
+      description.textContent = typeof value === "string" && value.trim() ? value : "이 자료에서 미제공 또는 미수집 · 원문 확인 필요";
+      fields.append(term, description);
+    }
+    const provenance = document.createElement("p");
+    const sourceName = { "ncs-common": "NCS 능력단위 공통정보", "ncs-training-2025": "NCS 훈련기준 파일" }[item.source_slug] || "NCS 참고 자료";
+    provenance.textContent = `자료 구분: ${sourceName} · 수집 시각: ${item.collected_at || "미확인"} · 원자료 기준일: ${item.source_updated_at || "미확인"}`;
+    const notice = document.createElement("p");
+    notice.textContent = "미제공·미수집 항목을 AI로 채워 공식 정보처럼 표시하지 않습니다. 적용하면 비어 있는 목표 직무·NCS 분류·관련 업무만 채웁니다. 기존 입력, 지원 기관과 경험은 그대로 유지합니다. 글자 수 제한을 넘는 원문은 자동 적용하지 않습니다. 적용한 자료의 제공기관·출처·기준 버전은 초안과 복사 내용에도 함께 보관합니다.";
+    panel.append(title, context, fields, provenance);
+    const href = safeSourceLink(item.source_url);
+    if (href) {
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "정부 원문·데이터 출처 확인 ↗";
+      panel.append(link);
+    }
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "button button-dark";
+    apply.textContent = "비어 있는 항목에 참고 자료 적용";
+    apply.addEventListener("click", () => applyCatalogReference(item));
+    const applyStatus = document.createElement("p");
+    applyStatus.id = "catalog-apply-status";
+    applyStatus.role = "status";
+    panel.append(notice, apply, applyStatus);
+  } catch {
+    if (request !== catalogDetailRequest) return;
+    panel.textContent = "상세 정보를 불러오지 못했습니다. 작성한 내용은 변경되지 않았습니다. 자료를 다시 선택해 주세요.";
+  }
 }
 
 async function searchJobs(query) {
+  const request = ++archiveRequest;
   const stateLabel = $("#job-search-state");
   const results = $("#job-results");
   results.replaceChildren();
@@ -609,6 +1181,7 @@ async function searchJobs(query) {
     const response = await fetch(`/api/jobs?q=${encodeURIComponent(query)}&limit=30`);
     if (!response.ok) throw new Error();
     const data = await response.json();
+    if (request !== archiveRequest) return;
     if (!data.items.length) {
       stateLabel.textContent = query ? "일치하는 직무가 없습니다. 직접 입력하거나 다른 단어로 찾아보세요." : "아직 동기화된 직무가 없습니다. 직접 입력해 먼저 작성할 수 있습니다.";
       return;
@@ -616,6 +1189,7 @@ async function searchJobs(query) {
     stateLabel.textContent = `${data.items.length.toLocaleString("ko-KR")}개 직무를 찾았습니다.`;
     data.items.forEach(profile => results.append(createJobResult(profile)));
   } catch {
+    if (request !== archiveRequest) return;
     stateLabel.textContent = "직무 데이터를 불러오지 못했습니다. 직접 입력으로 계속 진행할 수 있습니다.";
   }
 }
@@ -645,6 +1219,7 @@ function createJobResult(profile) {
 }
 
 function selectJob(profile) {
+  for (const field of ["reference_catalog_id", "reference_source_url", "reference_name", "reference_version"]) state[field] = "";
   state.institution = profile.institution_name || "";
   state.target_job = profile.job_title || "";
   state.ncs_path = profile.ncs_path || (profile.ncs_categories || []).join(" · ");
@@ -696,7 +1271,7 @@ async function loadSources() {
   }
 }
 
-async function composeDraft() {
+function composeDraft() {
   if (!state.facts_confirmed) {
     $("#form-message").textContent = "실제 경험 확인란에 동의해야 초안을 만들 수 있습니다.";
     $("#facts_confirmed")?.focus();
@@ -706,13 +1281,7 @@ async function composeDraft() {
   button.disabled = true;
   button.textContent = "초안 작성 중…";
   try {
-    const response = await fetch("/api/drafts/compose", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(state)
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message || "초안을 만들지 못했습니다.");
+    const data = JobAndKillComposer.compose(state);
     $("#draft-output").textContent = data.output;
     $("#fact-coverage").textContent = `${data.fact_coverage}%`;
     const warnings = $("#warning-list");
@@ -745,13 +1314,31 @@ function bindPage() {
   });
   $("#login-form").addEventListener("submit", requestLogin);
   $("#logout").addEventListener("click", logout);
+  const rememberControl = $("#remember-draft");
+  rememberControl.checked = rememberDraft;
+  rememberControl.disabled = !persistentStorageAvailable;
+  rememberControl.addEventListener("change", event => {
+    if (!persistentStorageAvailable) {
+      event.target.checked = false;
+      return;
+    }
+    rememberDraft = event.target.checked;
+    saveBrowserDraft();
+  });
+  $("#export-account").addEventListener("click", exportAccount);
+  $("#delete-all-drafts").addEventListener("click", deleteAllAccountDrafts);
+  $("#delete-account").addEventListener("click", deleteAccount);
   $("#keep-local-draft").addEventListener("click", keepLocalDraft);
   $("#use-server-draft").addEventListener("click", useServerDraft);
   $("#browse-jobs").addEventListener("click", openJobDialog);
   $("#change-job").addEventListener("click", openJobDialog);
   $("#open-sources").addEventListener("click", () => { $("#source-dialog").showModal(); loadSources(); });
   $("#footer-sources").addEventListener("click", () => { $("#source-dialog").showModal(); loadSources(); });
-  $("#job-search-form").addEventListener("submit", event => { event.preventDefault(); searchJobs($("#job-search").value); });
+  $("#job-search-form").addEventListener("submit", event => { event.preventDefault(); searchArchive($("#job-search").value); });
+  $$('input[name="archive-scope"]').forEach(input => input.addEventListener("change", event => setArchiveScope(event.target.value)));
+  $("#catalog-previous").addEventListener("click", () => searchArchive(catalogQuery, Math.max(0, catalogOffset - CATALOG_PAGE_SIZE)));
+  $("#catalog-next").addEventListener("click", () => searchArchive(catalogQuery, catalogOffset + CATALOG_PAGE_SIZE));
+  $("#job-dialog").addEventListener("close", () => { archiveRequest += 1; clearCatalogDetail(); });
   $("#use-manual-job").addEventListener("click", () => {
     closeDialog("job-dialog");
     if ($("#workspace").hidden) showWorkspace();
@@ -789,6 +1376,7 @@ function bindPage() {
 bindPage();
 loadHealth();
 (async () => {
+  await loadPrivacyConfig();
   await consumeLoginToken();
   await loadAuth();
 })();

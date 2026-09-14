@@ -9,7 +9,7 @@
       "source": {
         "source": "url",
         "url": "https://github.com/DietrichGebert/ponytail.git",
-        "ref": "v4.9.0"
+        "ref": "0a4dd63ad4541f4f655c4108a295916f3c1d8fda"
       },
       "policy": {
         "installation": "INSTALLED_BY_DEFAULT",

@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 import shutil
+import stat
 import subprocess
 import time
 import urllib.error
@@ -35,6 +36,13 @@ from .storage import (
 
 USER_AGENT = "JobAndKillCollector/0.1 (+https://github.com/jonandkill/Jobandkill)"
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+MAX_HWPX_MEMBERS = 512
+MAX_HWPX_MEMBER_BYTES = 16 * 1024 * 1024
+MAX_HWPX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
+MAX_HWPX_COMPRESSION_RATIO = 200
+MAX_HWPX_MEMBER_PATH_LENGTH = 512
+HWPX_COMPRESSION_TYPES = frozenset((zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED))
+HWPX_SECTION_PATH = re.compile(r"^Contents/section[0-9]+\.xml$")
 ALLOWED_DOWNLOAD_HOST_SUFFIXES = (".data.go.kr", ".alio.go.kr", ".ncs.go.kr")
 ALLOWED_DOCUMENT_RIGHTS = ("open_document", "authorized")
 RESTRICTIVE_DOCUMENT_RIGHTS = ("metadata_only", "restricted", "review_required")
@@ -2034,18 +2042,92 @@ def _pdf_pages(document: Path | bytes) -> list[str]:
         return [completed.stdout.decode("utf-8", errors="replace")]
 
 
+def _unsafe_hwpx(reason: str) -> ValueError:
+    return ValueError(f"안전 제한을 충족하지 않는 HWPX 문서입니다: {reason}")
+
+
+def _validate_hwpx_member(info: zipfile.ZipInfo, seen_names: set[str]) -> None:
+    name = info.filename
+    if (
+        not name
+        or len(name) > MAX_HWPX_MEMBER_PATH_LENGTH
+        or name.startswith("/")
+        or "\\" in name
+        or "\x00" in name
+    ):
+        raise _unsafe_hwpx("허용되지 않은 압축 항목 경로")
+    path = name[:-1] if name.endswith("/") else name
+    if not path or any(part in {"", ".", ".."} for part in path.split("/")):
+        raise _unsafe_hwpx("허용되지 않은 압축 항목 경로")
+    if name in seen_names:
+        raise _unsafe_hwpx("중복된 압축 항목 경로")
+    seen_names.add(name)
+    if info.flag_bits & 0x1:
+        raise _unsafe_hwpx("암호화된 압축 항목")
+    if info.compress_type not in HWPX_COMPRESSION_TYPES:
+        raise _unsafe_hwpx("지원하지 않는 압축 방식")
+    unix_mode = info.external_attr >> 16
+    file_type = stat.S_IFMT(unix_mode) if info.create_system == 3 else 0
+    if file_type not in {0, stat.S_IFREG, stat.S_IFDIR}:
+        raise _unsafe_hwpx("일반 파일이 아닌 압축 항목")
+    if info.file_size < 0 or info.compress_size < 0:
+        raise _unsafe_hwpx("올바르지 않은 압축 항목 크기")
+    if info.file_size > MAX_HWPX_MEMBER_BYTES:
+        raise _unsafe_hwpx("개별 압축 항목 크기 제한 초과")
+    if info.file_size and (
+        info.compress_size == 0
+        or info.file_size > info.compress_size * MAX_HWPX_COMPRESSION_RATIO
+    ):
+        raise _unsafe_hwpx("개별 압축 항목의 압축비 제한 초과")
+
+
 def _hwpx_pages(document: Path | bytes) -> list[str]:
+    compressed_size = len(document) if isinstance(document, bytes) else document.stat().st_size
+    if compressed_size > MAX_DOCUMENT_BYTES:
+        raise _unsafe_hwpx("25MB 압축 파일 크기 제한 초과")
     pages: list[str] = []
     source: Any = io.BytesIO(document) if isinstance(document, bytes) else document
-    with zipfile.ZipFile(source) as archive:
-        section_names = sorted(
-            name for name in archive.namelist()
-            if name.startswith("Contents/section") and name.endswith(".xml")
-        )
-        for name in section_names:
-            root = ET.fromstring(archive.read(name))
-            chunks = [element.text or "" for element in root.iter() if element.tag.split("}")[-1] == "t"]
-            pages.append("\n".join(chunks))
+    try:
+        with zipfile.ZipFile(source) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_HWPX_MEMBERS:
+                raise _unsafe_hwpx("압축 항목 수 제한 초과")
+            seen_names: set[str] = set()
+            total_uncompressed = 0
+            total_compressed = 0
+            sections: list[zipfile.ZipInfo] = []
+            for info in members:
+                _validate_hwpx_member(info, seen_names)
+                total_uncompressed += info.file_size
+                total_compressed += info.compress_size
+                if total_uncompressed > MAX_HWPX_UNCOMPRESSED_BYTES:
+                    raise _unsafe_hwpx("전체 압축 해제 크기 제한 초과")
+                if HWPX_SECTION_PATH.fullmatch(info.filename) and not info.is_dir():
+                    sections.append(info)
+            if total_uncompressed and (
+                total_compressed == 0
+                or total_uncompressed > total_compressed * MAX_HWPX_COMPRESSION_RATIO
+            ):
+                raise _unsafe_hwpx("전체 압축비 제한 초과")
+            if not sections:
+                raise _unsafe_hwpx("직무 내용 섹션 XML 없음")
+            for info in sorted(sections, key=lambda item: item.filename):
+                with archive.open(info) as member:
+                    xml_payload = member.read(MAX_HWPX_MEMBER_BYTES + 1)
+                if len(xml_payload) > MAX_HWPX_MEMBER_BYTES or len(xml_payload) != info.file_size:
+                    raise _unsafe_hwpx("압축 항목의 실제 크기 불일치")
+                try:
+                    root = ET.fromstring(xml_payload)
+                except ET.ParseError as error:
+                    raise _unsafe_hwpx("올바르지 않은 섹션 XML") from error
+                chunks = [
+                    element.text or ""
+                    for element in root.iter()
+                    if element.tag.split("}")[-1] == "t"
+                ]
+                pages.append("\n".join(chunks))
+    except (zipfile.BadZipFile, zipfile.LargeZipFile) as error:
+        raise _unsafe_hwpx("올바르지 않은 ZIP 구조") from error
     return pages
 
 
@@ -2056,6 +2138,8 @@ SECTION_LABELS: dict[str, tuple[str, ...]] = {
     "attitudes": ("직무수행태도", "직무 수행태도", "태도"),
     "qualifications": ("관련자격", "관련 자격", "자격요건", "지원자격"),
 }
+MAX_SECTION_VALUES_PER_FIELD = 100
+MAX_EXTRACTION_EVIDENCE_ITEMS = 500
 
 
 def extract_sections(pages: list[str]) -> tuple[dict[str, list[str]], list[dict[str, Any]]]:
@@ -2082,8 +2166,6 @@ def extract_sections(pages: list[str]) -> tuple[dict[str, list[str]], list[dict[
                 continue
             if current and len(line) >= 2:
                 _add_section_value(sections, evidence, current, line, page_number)
-    for key in sections:
-        sections[key] = sections[key][:100]
     return sections, evidence
 
 
@@ -2094,6 +2176,11 @@ def _add_section_value(
         value = clean_text(chunk.strip("-–—; "), 1_000)
         if len(value) < 2 or value in sections[field_name]:
             continue
+        if (
+            len(sections[field_name]) >= MAX_SECTION_VALUES_PER_FIELD
+            or len(evidence) >= MAX_EXTRACTION_EVIDENCE_ITEMS
+        ):
+            raise ValueError("문서 추출 항목이 안전 한도를 초과했습니다.")
         sections[field_name].append(value)
         evidence.append({"field_name": field_name, "field_value": value, "page_number": page_number, "excerpt": value[:300]})
 
