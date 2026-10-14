@@ -370,8 +370,28 @@ def parse_api_payload(payload: bytes, content_type: str = "") -> tuple[list[dict
         try:
             data = _xml_to_dict(ET.fromstring(decoded))
         except ET.ParseError as error:
-            raise ValueError(f"공식 API 응답을 JSON/XML로 해석할 수 없습니다: {content_type}") from error
+            raise ValueError("공식 API 응답을 JSON/XML로 해석할 수 없습니다.") from None
+    # Gateways can return authentication failures with HTTP 200. Never treat
+    # their error envelope as a successful empty dataset or echo remote text.
+    envelopes = [data]
+    if isinstance(data, dict):
+        response = data.get("response")
+        if isinstance(response, dict):
+            envelopes += [response, response.get("header")]
+        envelopes += [data.get("header"), data.get("cmmMsgHeader")]
+        gateway = data.get("OpenAPI_ServiceResponse")
+        if isinstance(gateway, dict):
+            envelopes += [gateway, gateway.get("cmmMsgHeader")]
+    for envelope in envelopes:
+        if not isinstance(envelope, dict):
+            continue
+        for code_field in ("resultCode", "returnReasonCode"):
+            if code_field in envelope and str(envelope[code_field]).strip() not in {"0", "00", "0000"}:
+                raise ValueError("공식 API 오류 응답: 활용승인·키·만료·호출량·요청 명세 확인 필요")
+        if "errMsg" in envelope or "error" in envelope:
+            raise ValueError("공식 API 오류 응답: 활용승인·키·요청 명세 확인 필요")
     records = _walk_for_records(data)
+    records = [item["item"] if set(item) == {"item"} and isinstance(item["item"], dict) else item for item in records]
     total: int | None = None
     stack = [data]
     while stack:
@@ -387,6 +407,10 @@ def parse_api_payload(payload: bytes, content_type: str = "") -> tuple[list[dict
                     stack.append(value)
         elif isinstance(current, list):
             stack.extend(current)
+    if total is not None and total < 0:
+        raise ValueError("공식 API 전체 건수가 올바르지 않습니다.")
+    if not records and total != 0:
+        raise ValueError("공식 API 빈 응답의 전체 건수·구조를 확인할 수 없습니다.")
     return records, total
 
 
@@ -408,6 +432,9 @@ class AlioApiSource:
         missing = {name for name in ("service_key", "page", "page_size") if "{" + name + "}" not in self.template}
         if missing:
             raise ConfigurationError("API URL 템플릿에 다음 자리표시자가 필요합니다: " + ", ".join(sorted(missing)))
+        from .preflight import validate_api_template
+        if not validate_api_template(self.template):
+            raise ConfigurationError("ALIO API URL 템플릿 형식·자리표시자가 올바르지 않습니다.")
         parsed = urllib.parse.urlparse(self.template)
         if parsed.scheme != "https" or not parsed.hostname or not (
             parsed.hostname == "data.go.kr" or parsed.hostname.endswith(".data.go.kr")
@@ -431,6 +458,10 @@ class AlioApiSource:
             if not records:
                 self.truncated = total is not None and seen < total
                 break
+            # Official /list deliberately omits attachment details (files=[]).
+            # Absence here is not an authoritative withdrawal. /detail requires
+            # a separate approved fetch before attachment reconciliation.
+            records = [{k: v for k, v in record.items() if k != "files"} for record in records]
             yield records
             seen += len(records)
             if total is not None and seen >= total:
@@ -442,10 +473,16 @@ class AlioApiSource:
                 self.truncated = total is None or seen < total
 
 
+class _RejectApiRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # A redirect must never forward a service-key query to another origin.
+        raise RuntimeError("공식 API 리다이렉트 차단: 승인된 최종 URL 명세 확인 필요")
+
+
 def _fetch_api_response(request: urllib.request.Request) -> tuple[bytes, str]:
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.build_opener(_RejectApiRedirect()).open(request, timeout=30) as response:
                 return response.read(10 * 1024 * 1024 + 1), response.headers.get("Content-Type", "")
         except urllib.error.HTTPError as error:
             retryable = error.code == 429 or 500 <= error.code < 600

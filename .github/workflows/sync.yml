@@ -5,6 +5,11 @@ on:
     - cron: "35 18 * * *"
   workflow_dispatch:
     inputs:
+      diagnose_only:
+        description: "읽기 전용 진단만 실행 (DB 초기화·수집·문서 처리 안 함)"
+        required: true
+        type: boolean
+        default: true
       full_sync:
         description: "승인 후 최초 전체 동기화 실행"
         required: true
@@ -33,19 +38,26 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements-production.txt
       - name: Check configuration without printing secrets
-        run: python -m jobandkill doctor --production --require-api --collector-only
+        run: python -m jobandkill.preflight --check-connections --summary
         env:
           JOBNKILL_DATABASE_URL: ${{ secrets.JOBNKILL_DATABASE_URL }}
           JOBNKILL_ALIO_API_URL_TEMPLATE: ${{ secrets.JOBNKILL_ALIO_API_URL_TEMPLATE }}
           JOBNKILL_ALIO_SERVICE_KEY: ${{ secrets.JOBNKILL_ALIO_SERVICE_KEY }}
           JOBNKILL_STORAGE_BACKEND: s3
           JOBNKILL_S3_BUCKET: ${{ secrets.JOBNKILL_S3_BUCKET }}
+          JOBNKILL_S3_REGION: ${{ vars.JOBNKILL_S3_REGION || 'ap-northeast-2' }}
+          JOBNKILL_S3_PREFIX: ${{ vars.JOBNKILL_S3_PREFIX || 'documents' }}
+          JOBNKILL_S3_ENDPOINT_URL: ${{ secrets.JOBNKILL_S3_ENDPOINT_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.JOBNKILL_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.JOBNKILL_S3_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.JOBNKILL_S3_SESSION_TOKEN }}
       - name: Initialize schema
+        if: ${{ github.event_name == 'schedule' || !inputs.diagnose_only }}
         run: python -m jobandkill init
         env:
           JOBNKILL_DATABASE_URL: ${{ secrets.JOBNKILL_DATABASE_URL }}
       - name: Refresh official metadata
-        if: ${{ github.event_name == 'schedule' || !inputs.full_sync }}
+        if: ${{ github.event_name == 'schedule' || (!inputs.diagnose_only && !inputs.full_sync) }}
         run: python -m jobandkill sync --source data-go-kr-alio
         env:
           JOBNKILL_DATABASE_URL: ${{ secrets.JOBNKILL_DATABASE_URL }}
@@ -58,8 +70,9 @@ jobs:
           JOBNKILL_S3_ENDPOINT_URL: ${{ secrets.JOBNKILL_S3_ENDPOINT_URL }}
           AWS_ACCESS_KEY_ID: ${{ secrets.JOBNKILL_S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.JOBNKILL_S3_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.JOBNKILL_S3_SESSION_TOKEN }}
       - name: Initial full metadata sync
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_sync }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.diagnose_only && inputs.full_sync }}
         run: python -m jobandkill sync --source data-go-kr-alio --full
         env:
           JOBNKILL_DATABASE_URL: ${{ secrets.JOBNKILL_DATABASE_URL }}
@@ -72,7 +85,9 @@ jobs:
           JOBNKILL_S3_ENDPOINT_URL: ${{ secrets.JOBNKILL_S3_ENDPOINT_URL }}
           AWS_ACCESS_KEY_ID: ${{ secrets.JOBNKILL_S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.JOBNKILL_S3_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.JOBNKILL_S3_SESSION_TOKEN }}
       - name: Process only rights-approved documents
+        if: ${{ github.event_name == 'schedule' || !inputs.diagnose_only }}
         run: python -m jobandkill process-documents --limit 50 --fail-on-error
         env:
           JOBNKILL_DATABASE_URL: ${{ secrets.JOBNKILL_DATABASE_URL }}
@@ -83,3 +98,4 @@ jobs:
           JOBNKILL_S3_ENDPOINT_URL: ${{ secrets.JOBNKILL_S3_ENDPOINT_URL }}
           AWS_ACCESS_KEY_ID: ${{ secrets.JOBNKILL_S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.JOBNKILL_S3_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.JOBNKILL_S3_SESSION_TOKEN }}
