@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import http.client
 import io
 import json
 import mimetypes
@@ -108,11 +109,11 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
         "recrutPbancUrl", "recrutPblntUrl", "url", "detailUrl", "homepageUrl",
         "srcUrl", "originUrl",
     ),
-    "employment_type": ("hireTypeNm", "employmentType", "hireType", "emplymShpNm"),
+    "employment_type": ("hireTypeNmLst", "hireTypeNm", "employmentType", "hireType", "emplymShpNm"),
     "hiring_type": ("recrutSeNm", "hiringType", "recruitType", "recrutSe"),
-    "education": ("acbgCondNm", "education", "educationCondition", "acbgCond"),
-    "regions": ("workRgnNm", "regions", "workRegion", "workRgnLst", "regionNames"),
-    "ncs_categories": ("ncsCdNm", "ncsCategories", "ncsCdLst", "ncsNames", "ncs"),
+    "education": ("acbgCondNmLst", "acbgCondNm", "education", "educationCondition", "acbgCond"),
+    "regions": ("workRgnNmLst", "workRgnNm", "regions", "workRegion", "workRgnLst", "regionNames"),
+    "ncs_categories": ("ncsCdNmLst", "ncsCdNm", "ncsCategories", "ncsCdLst", "ncsNames", "ncs"),
     "positions": ("recrutJobsNm", "positions", "jobNames", "recruitJobs", "recrutJobs"),
     "headcount_text": ("recrutNope", "headcount", "recruitCount", "hireCount"),
     "qualifications": ("aplyQlfcCn", "qualifications", "qualification", "eligibility"),
@@ -362,11 +363,57 @@ def _xml_to_dict(element: ET.Element) -> Any:
     return result
 
 
-def parse_api_payload(payload: bytes, content_type: str = "") -> tuple[list[dict[str, Any]], int | None]:
+def _strict_api_records(data: Any, *, is_xml: bool) -> tuple[list[dict[str, Any]], int]:
+    """Validate the live list contract without guessing from nested record data."""
+    failure = "공식 API 목록 응답의 성공코드·건수·공고 필드를 확인할 수 없습니다."
+    if not isinstance(data, dict):
+        raise ValueError(failure)
+    envelope = data.get("response", data)
+    if not isinstance(envelope, dict):
+        raise ValueError(failure)
+    header = envelope.get("header", {})
+    if "resultCode" not in envelope and not (isinstance(header, dict) and "resultCode" in header):
+        raise ValueError(failure)
+    body = envelope.get("body", envelope)
+    if not isinstance(body, dict):
+        raise ValueError(failure)
+    total = body.get("totalCount")
+    if isinstance(total, bool) or not isinstance(total, (str, int)) or not re.fullmatch(r"[0-9]+", str(total)):
+        raise ValueError(failure)
+    total = int(total)
+    if "result" in body:
+        raw = body["result"]
+    elif "items" in body:
+        raw = body["items"]
+    else:
+        raise ValueError(failure)
+    if isinstance(raw, dict) and set(raw) == {"item"}:
+        raw = raw["item"]
+        if isinstance(raw, dict):
+            raw = [raw]
+    if is_xml and raw == "":
+        raw = []
+    if not isinstance(raw, list) or not all(isinstance(record, dict) for record in raw):
+        raise ValueError(failure)
+    records = [record["item"] if set(record) == {"item"} else record for record in raw]
+    for record in records:
+        if not isinstance(record, dict) or not re.fullmatch(r"[0-9]+", str(record.get("recrutPblntSn", ""))):
+            raise ValueError(failure)
+        if any(not isinstance(record.get(field), str) or not record[field].strip()
+               for field in ("instNm", "recrutPbancTtl")):
+            raise ValueError(failure)
+    if total < len(records) or (not records and total != 0):
+        raise ValueError(failure)
+    return records, total
+
+
+def parse_api_payload(payload: bytes, content_type: str = "", *, require_contract: bool = False) -> tuple[list[dict[str, Any]], int | None]:
     decoded = payload.decode("utf-8-sig", errors="replace")
+    is_xml = False
     try:
         data: Any = json.loads(decoded)
     except json.JSONDecodeError:
+        is_xml = True
         try:
             data = _xml_to_dict(ET.fromstring(decoded))
         except ET.ParseError as error:
@@ -390,6 +437,8 @@ def parse_api_payload(payload: bytes, content_type: str = "") -> tuple[list[dict
                 raise ValueError("공식 API 오류 응답: 활용승인·키·만료·호출량·요청 명세 확인 필요")
         if "errMsg" in envelope or "error" in envelope:
             raise ValueError("공식 API 오류 응답: 활용승인·키·요청 명세 확인 필요")
+    if require_contract:
+        return _strict_api_records(data, is_xml=is_xml)
     records = _walk_for_records(data)
     records = [item["item"] if set(item) == {"item"} and isinstance(item["item"], dict) else item for item in records]
     total: int | None = None
@@ -453,7 +502,7 @@ class AlioApiSource:
             payload, content_type = _fetch_api_response(request)
             if len(payload) > 10 * 1024 * 1024:
                 raise ValueError("API 응답이 10MB 제한을 넘었습니다.")
-            records, total = parse_api_payload(payload, content_type)
+            records, total = parse_api_payload(payload, content_type, require_contract=True)
             self.total_count = total
             if not records:
                 self.truncated = total is not None and seen < total
@@ -485,15 +534,20 @@ def _fetch_api_response(request: urllib.request.Request) -> tuple[bytes, str]:
             with urllib.request.build_opener(_RejectApiRedirect()).open(request, timeout=30) as response:
                 return response.read(10 * 1024 * 1024 + 1), response.headers.get("Content-Type", "")
         except urllib.error.HTTPError as error:
+            error.close()
             retryable = error.code == 429 or 500 <= error.code < 600
             if not retryable or attempt == 2:
-                raise RuntimeError(f"공식 API 요청 실패: HTTP {error.code}") from error
+                raise RuntimeError(f"공식 API 요청 실패: HTTP {error.code}") from None
             retry_after = error.headers.get("Retry-After", "")
             delay = min(int(retry_after), 30) if retry_after.isdigit() else 2 ** attempt
             time.sleep(delay)
         except urllib.error.URLError as error:
             if attempt == 2:
-                raise RuntimeError("공식 API 네트워크 요청에 실패했습니다.") from error
+                raise RuntimeError("공식 API 네트워크 요청에 실패했습니다.") from None
+            time.sleep(2 ** attempt)
+        except (OSError, http.client.HTTPException, ValueError):
+            if attempt == 2:
+                raise RuntimeError("공식 API 전송·응답 읽기에 실패했습니다.") from None
             time.sleep(2 ** attempt)
     raise RuntimeError("공식 API 요청에 실패했습니다.")
 

@@ -1,5 +1,7 @@
 # Production data refresh 복구 기록 · 2026-10-14
 
+최신 검증·추가 보완·병합 조건: [2026-10-18 PR 적용 검증](production-refresh-review-20261018.md).
+
 ## 확인한 장애
 
 - 저장소: jonandkill/Jobandkill, 기본 브랜치 jobandkill1.
