@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import hashlib
+import ipaddress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -92,6 +93,32 @@ class LocalDocumentStore:
             path.unlink()
 
 
+def validate_s3_bucket(bucket: str) -> bool:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket) or ".." in bucket:
+        return False
+    try:
+        ipaddress.ip_address(bucket)
+    except ValueError:
+        return True
+    return False
+
+
+def validate_s3_endpoint(endpoint: str, *, local_dev: bool = False) -> bool:
+    try:
+        parsed = urlsplit(endpoint)
+        return bool(
+            parsed.hostname and parsed.port != 0
+            and not (parsed.username or parsed.password or parsed.query or parsed.fragment)
+            and not any(c.isspace() for c in endpoint)
+            and (parsed.scheme == "https" or (
+                local_dev and parsed.scheme == "http"
+                and parsed.hostname in {"127.0.0.1", "::1", "localhost"}
+            ))
+        )
+    except ValueError:
+        return False
+
+
 class S3DocumentStore:
     backend = "s3"
 
@@ -99,33 +126,20 @@ class S3DocumentStore:
         self.bucket = os.getenv("JOBNKILL_S3_BUCKET", "").strip()
         self.prefix = (os.getenv("JOBNKILL_S3_PREFIX", "").strip("/") or "documents")
         endpoint = os.getenv("JOBNKILL_S3_ENDPOINT_URL", "").strip() or None
-        if not self.bucket:
-            raise ValueError("S3 저장에는 JOBNKILL_S3_BUCKET이 필요합니다.")
+        if not validate_s3_bucket(self.bucket):
+            raise ValueError("유효한 S3 버킷 이름이 필요합니다 (URL/ARN 제외).")
         if any(part in {"", ".", ".."} for part in self.prefix.split("/")):
             raise ValueError("S3 문서 prefix 형식이 올바르지 않습니다.")
         if endpoint:
-            parsed_endpoint = urlsplit(endpoint)
-            valid_endpoint = bool(
-                parsed_endpoint.hostname
-                and not parsed_endpoint.username
-                and not parsed_endpoint.password
-                and not parsed_endpoint.query
-                and not parsed_endpoint.fragment
-            )
-            is_https = valid_endpoint and parsed_endpoint.scheme == "https"
-            is_local_dev = (
-                valid_endpoint
-                and os.getenv("JOBNKILL_ENV", "development") == "development"
-                and parsed_endpoint.scheme == "http"
-                and parsed_endpoint.hostname in {"127.0.0.1", "::1", "localhost"}
-            )
-            if not (is_https or is_local_dev):
+            if not validate_s3_endpoint(endpoint, local_dev=os.getenv("JOBNKILL_ENV", "development") == "development"):
                 raise ValueError("S3 엔드포인트는 HTTPS여야 합니다.")
         try:
             import boto3
+            from botocore.config import Config
         except ImportError as error:
             raise RuntimeError("S3 운영에는 requirements-production.txt의 boto3가 필요합니다.") from error
-        kwargs: dict[str, str] = {}
+        kwargs = {"config": Config(connect_timeout=10, read_timeout=10,
+                                   retries={"mode": "standard", "total_max_attempts": 2})}
         region = os.getenv("JOBNKILL_S3_REGION", "").strip()
         namespace = "|".join((self.bucket, endpoint or "aws-default", region or "default-region"))
         self.location_id = "s3:" + hashlib.sha256(namespace.encode()).hexdigest()
@@ -136,10 +150,10 @@ class S3DocumentStore:
         self.client = boto3.client("s3", **kwargs)
         try:
             versioning = self.client.get_bucket_versioning(Bucket=self.bucket)
-        except Exception as error:
+        except Exception:
             raise RuntimeError(
                 "S3 버킷 버전 관리 상태를 확인할 권한과 연결이 필요합니다."
-            ) from error
+            ) from None
         if versioning.get("Status") in {"Enabled", "Suspended"}:
             raise ValueError(
                 "원문을 완전히 삭제할 수 있도록 전용 S3 버킷의 버전 관리를 비활성화해야 합니다."

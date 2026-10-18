@@ -77,7 +77,7 @@ Render 무료 웹 서비스는 SMTP 25/465/587 포트를 차단합니다. 메일
 3. 자리표시자 `{service_key}`, `{page}`, `{page_size}`는 그대로 둡니다.
 
 ```bash
-export JOBNKILL_ALIO_API_URL_TEMPLATE='https://apis.data.go.kr/...?...&serviceKey={service_key}&pageNo={page}&numOfRows={page_size}&type=json'
+export JOBNKILL_ALIO_API_URL_TEMPLATE='https://apis.data.go.kr/1051000/recruitment/list?serviceKey={service_key}&pageNo={page}&numOfRows={page_size}&resultType=json'
 export JOBNKILL_ALIO_SERVICE_KEY='발급받은-키'
 python -m jobandkill doctor --require-api
 python -m jobandkill sync --source data-go-kr-alio --full

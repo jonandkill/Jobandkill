@@ -1,5 +1,9 @@
 # Job&Kill 운영 연결 절차
 
+Production data refresh 반복 실패의 진단·정확한 Secret 매핑·읽기 전용 재실행은
+[2026-10-14 복구 절차](production-refresh-recovery.md)를 먼저 참조합니다.
+수동 실행은 `diagnose_only=true`가 기본값이며 실제 갱신에는 `false`를 선택합니다.
+
 실제 서비스키·DB 비밀번호·S3 키·SMTP 비밀번호는 채팅, Git 커밋, workflow 입력값에 넣지 않습니다. 배포 플랫폼의 비밀 저장소 또는 GitHub Environment secrets에만 설정합니다.
 
 ## 1. 운영 자원

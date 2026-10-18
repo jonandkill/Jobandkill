@@ -27,6 +27,13 @@ class PostgreSqlContractTests(unittest.TestCase):
             count = connection.execute("SELECT COUNT(*) AS count FROM sources").fetchone()["count"]
         self.assertEqual(count, 5)
 
+    def test_preflight_uses_real_read_only_transaction(self) -> None:
+        from jobandkill.preflight import _database_probe
+        # Isolated CI service, never the production DSN. The probe itself
+        # verifies transaction_read_only before SELECT and closes on exit.
+        with patch.dict(os.environ, {"JOBNKILL_DATABASE_URL": POSTGRES_URL}):
+            _database_probe()
+
     def test_ingest_json_search_and_idempotency(self) -> None:
         marker = uuid.uuid4().hex
         record = {
